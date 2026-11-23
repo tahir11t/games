@@ -1,0 +1,61 @@
+# Codemagic CI for حرب الرمال (Sand Wars): web game (Vite) wrapped with Capacitor.
+# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-native-android-app/
+workflows:
+  # 1) Test APK: no signing setup needed. Install it directly on a phone.
+  android-debug:
+    name: Sand Wars · Android debug APK
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      node: 22
+      java: 21
+    triggering:
+      events: [push]
+      branch_patterns:
+        - pattern: main
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Build web game
+        script: npm run build
+      - name: Copy web build into Android project
+        script: npx cap sync android
+      - name: Point Gradle at the Android SDK
+        script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Build debug APK
+        script: cd android && ./gradlew assembleDebug
+    artifacts:
+      - android/app/build/outputs/apk/**/*.apk
+
+  # 2) Google Play build: signed AAB (+ signed APK).
+  #    Needs a keystore uploaded in Codemagic: Team settings → Code signing identities →
+  #    Android keystores, with reference name "sandwars_keystore".
+  android-release:
+    name: Sand Wars · Android release (Play Store)
+    instance_type: linux_x2
+    max_build_duration: 40
+    environment:
+      node: 22
+      java: 21
+      android_signing:
+        - sandwars_keystore
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Build web game
+        script: npm run build
+      - name: Copy web build into Android project
+        script: npx cap sync android
+      - name: Point Gradle at the Android SDK
+        script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Build signed AAB and APK
+        script: cd android && ./gradlew bundleRelease assembleRelease
+    artifacts:
+      - android/app/build/outputs/bundle/release/*.aab
+      - android/app/build/outputs/apk/release/*.apk
+    # To upload to Google Play automatically, add a service-account JSON as the
+    # GCLOUD_SERVICE_ACCOUNT_CREDENTIALS variable (group "google_play") and uncomment:
+    # publishing:
+    #   google_play:
+    #     credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+    #     track: internal

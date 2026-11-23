@@ -1,0 +1,8 @@
+{
+  "appId": "com.sandwars.game",
+  "appName": "Sand Wars",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#2b1d10"
+  }
+}
