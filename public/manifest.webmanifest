@@ -1,0 +1,10 @@
+{
+  "name": "حرب الرمال · Sand Wars",
+  "short_name": "Sand Wars",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#2b1d10",
+  "theme_color": "#2b1d10",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
