@@ -1,11 +1,22 @@
-import type { EnemyId } from './units';
+import type { EnemyId, UnitId } from './units';
 
 /** What each enemy costs from the enemy's wave budget. */
-const ENEMY_COST: Record<EnemyId, number> = { miner: 50, sword: 75, bandit: 70, archer: 150, spear: 250, sandmage: 180, camel: 400, golem: 450, ghost: 200, catapult: 600, boss: 0 };
+export const ENEMY_COST: Partial<Record<EnemyId, number>> = { miner: 50, sword: 75, bandit: 70, archer: 150, spear: 250, sandmage: 180, camel: 400, golem: 450, ghost: 200, catapult: 600, hyena: 60, vulture: 90, fire: 300, lion: 320, assassin: 350, giant: 700, boss: 0 };
+const costOf = (u: EnemyId) => ENEMY_COST[u] ?? 200;
 
 export type RegionId = 'oasis' | 'dunes' | 'mountains' | 'shadow';
 
-export interface Wave { t: number; unit: EnemyId; count: number; }
+export interface Wave { t: number; unit: EnemyId; count: number; mult?: number; }
+
+export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily';
+
+/** Battle-rule modifiers (challenges and the daily challenge). */
+export interface Mods {
+  enemySpeed?: number;
+  enemyDmg?: number;
+  goldMult?: number;
+  noMiners?: boolean; // no miners: passive income instead
+}
 
 export interface LevelDef {
   index: number; // 1..40
@@ -16,6 +27,12 @@ export interface LevelDef {
   waves: Wave[];
   loopAfter: number; // seconds: script repeats from this time with escalation
   reward: number; // base gold
+  kind?: LevelKind;
+  id?: string;
+  allowed?: UnitId[]; // restrict the player's unit bar
+  mods?: Mods;
+  noCounters?: boolean;
+  startGold?: number; // overrides the default 150
 }
 
 export const REGIONS: { id: RegionId; from: number; to: number; enemy: EnemyId }[] = [
@@ -34,7 +51,7 @@ function rng(seed: number) {
 }
 
 /** Per-level difficulty factors produced by scripts/tune.ts (1 = untuned). */
-export const TUNE: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1.01, 1.25, 1.25, 1.25, 1.25, 1.25, 1.25, 1.25, 1.25, 0.85, 0.75, 1.25, 0.86, 1.25, 1.18, 1.17, 1.2, 1.25, 1.25, 0.91, 0.58, 1.19, 0.77, 1.02, 1.04, 1.25, 0.91, 0.95, 0.91, 0.94, 0.69];
+export const TUNE: number[] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.08, 1.25, 1.25, 1.25, 1.25, 1.25, 1.25, 1.25, 1.25, 0.91, 0.73, 1.25, 0.96, 1.01, 1.25, 1.25, 1.19, 1.25, 1.25, 0.7, 0.6, 1.14, 0.74, 0.83, 1.03, 1.21, 0.91, 0.7, 0.89, 0.93, 0.66];
 
 export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef {
   const region = regionOf(index);
@@ -76,9 +93,9 @@ export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef
     let guard = 0;
     do {
       // Opening grace period: only cheap units before the player has an army.
-      const choices = t < 35 ? pool.filter((u) => ENEMY_COST[u] <= 200) : pool;
+      const choices = t < 35 ? pool.filter((u) => costOf(u) <= 200) : pool;
       const unit = choices[Math.floor(r() * choices.length)];
-      const c = ENEMY_COST[unit];
+      const c = costOf(unit);
       if (c > budget && counts.size) break;
       budget -= c;
       counts.set(unit, (counts.get(unit) ?? 0) + 1);
@@ -98,6 +115,7 @@ export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef
     waves,
     loopAfter: duration,
     reward: 60 + index * 15 + (boss ? 150 : 0),
+    kind: 'campaign',
   };
 }
 

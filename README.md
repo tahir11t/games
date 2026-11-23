@@ -40,6 +40,26 @@ Desktop keys: `1–6` train units · `E` take/release control · `A`/`D` move ·
 | §9 Analytics events (`tutorial_step`, `level_start/complete/fail`, `unit_spawned`, `upgrade_purchased`, `ad_offer_shown/ad_watched`, `session_length`) | ✅ sent to Supabase |
 | §9 Max 40 units per army, landscape, thumb-reachable controls | ✅ |
 
+## v0.2: more units, monster challenges, modes and a shop
+
+- **14 player units** in a scrolling unit bar. The 6 PRD units come from the campaign; 8 new ones come from the shop:
+  - Healer: heals the most wounded ally.
+  - Falcon: flying.
+  - Fire Breather: area flames.
+  - Lion: fast, double-damage first pounce.
+  - Shadow Blade: crits and dodges.
+  - Giant: tank with area smash.
+  - Emerald Genie: flying, exploding magic.
+  - Legendary Hero: limit 1, +15% damage aura.
+- **Flying units:** only ranged and flying units can hit them, so unit choice matters.
+- **8 monster challenges**, each a boss fight with its own rules: Hyena Pack, Archers' Trial (ranged only), Scorpion King, the Roc (flying), Sand Worm, Stone Titan, Shadow Djinn, the Warlord. The first win gives a 🏆 trophy, gems, and unlocks the right to buy that challenge's unit or skill.
+- **Shop:** buy units, 5 commander skills (Arrow Volley, War Cry, Oasis Water, Sandstorm, Meteor; choose one to equip) and 5 passive boosts (3 levels each: mining, fort walls, starting gold, Eagle Eye, ability charge).
+  - The strong items need **a challenge trophy plus gems**, so every one of them can be earned through play.
+- **Modes:** Campaign · Monster Challenges · Survival (endless waves, a boss every 5th wave, best score saved) · Daily Challenge (a rotating rule, e.g. ranged only, fast enemies, no miners; 💎25 + 🪙300 once a day).
+- **Art:** an original colourful cartoon style (big-headed characters with faces, coloured outfits, beasts and monsters), drawn procedurally in `src/game/art.ts`.
+
+`npx tsx scripts/challenges.ts --tune` tunes each challenge so the bot wins about 50% at 2 upgrade levels above expected.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.
@@ -75,7 +95,10 @@ src/
   data/units.ts    unit stats (PRD §5) and upgrade formulas
   data/levels.ts   40 levels: regions, wave budgets, tuning
   game/battle.ts   simulation (economy, AI, combat, projectiles)
-  game/render.ts   procedural Stickman/canvas renderer
+  data/skills.ts   commander skills, passives, shop requirements
+  data/challenges.ts monster challenges, daily rules, survival waves
+  game/render.ts   canvas renderer (world, forts, effects)
+  game/art.ts      character art for all units and monsters
   game/audio.ts    synthesized music + SFX
 scripts/           headless balance + tuning
 supabase/          SQL migrations

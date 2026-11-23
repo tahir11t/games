@@ -1,8 +1,10 @@
 import './style.css';
 import { t, tk, setLang, getLang, num, type Key } from './i18n';
 import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents } from './save';
-import { UNITS, PLAYER_UNITS, MAX_UNIT_LEVEL, upgradeCost, upgradeMult, type UnitId } from './data/units';
-import { LEVELS, REGIONS, type RegionId } from './data/levels';
+import { UNITS, PLAYER_UNITS, BASE_UNITS, MAX_UNIT_LEVEL, upgradeCost, upgradeMult, type UnitId } from './data/units';
+import { LEVELS, REGIONS, type RegionId, type LevelDef } from './data/levels';
+import { ABILITIES, PASSIVES, PASSIVE_MAX, UNIT_SHOP, type AbilityId, type PassiveId, type Requirement, type Perks } from './data/skills';
+import { CHALLENGES, challengeById, challengeLevel, dailyFor, survivalLevel, type ChallengeDef } from './data/challenges';
 import { Battle, W } from './game/battle';
 import { Renderer } from './game/render';
 import { sfx, setSound, startMusic, stopMusic, unlockAudio } from './game/audio';
@@ -11,12 +13,30 @@ const ui = document.getElementById('ui')!;
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
 const icons = Object.fromEntries(PLAYER_UNITS.map((id) => [id, Renderer.icon(UNITS[id])])) as Record<UnitId, string>;
+const bossIcons: Record<string, string> = {};
+for (const c of CHALLENGES) bossIcons[c.id] = Renderer.icon(UNITS[c.boss], 96, 1);
 
 const h = (html: string) => { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild as HTMLElement; };
 const $ = <T extends HTMLElement = HTMLElement>(root: ParentNode, sel: string) => root.querySelector(sel) as T;
 const starsHtml = (n: number) => [0, 1, 2].map((i) => `<span class="${i < n ? '' : 'off'}">★</span>`).join('');
 const totalStars = () => Object.values(save.stars).reduce((a, b) => a + b, 0);
 let lastRewardedAd = 0;
+
+// ---------------- Ownership / requirements ----------------
+const isBase = (id: UnitId) => BASE_UNITS.includes(id);
+function unitAvailable(id: UnitId) { return isBase(id) ? save.unlocked >= UNITS[id].unlock || !!save.stars[UNITS[id].unlock] : save.owned.includes(id); }
+function reqMet(r: Requirement) { return (!r.level || save.unlocked > r.level || !!save.stars[r.level]) && (!r.challenge || (save.trophies[r.challenge] ?? 0) > 0); }
+function canAfford(r: Requirement) { return save.gold >= (r.gold ?? 0) && save.gems >= (r.gems ?? 0); }
+function pay(r: Requirement) { save.gold -= r.gold ?? 0; save.gems -= r.gems ?? 0; }
+const priceHtml = (r: Requirement) => [r.gold ? `🪙 ${num(r.gold)}` : '', r.gems ? `💎 ${num(r.gems)}` : ''].filter(Boolean).join(' ') || '✓';
+function reqHtml(r: Requirement) {
+  if (r.level && !(save.unlocked > r.level || save.stars[r.level])) return `🔒 ${t('needLevel')} ${num(r.level)}`;
+  if (r.challenge && !(save.trophies[r.challenge] ?? 0)) return `🔒 ${t('needChallenge')} «${tk('ch_' + r.challenge)}»`;
+  return '';
+}
+function perks(): Perks { return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives }; }
+const unlockName = (k: string) => (k in UNITS ? tk('u_' + k) : k in ABILITIES ? tk('a_' + k) : tk('p_' + k));
+const unlockIcon = (k: string) => (k in UNITS ? `<img src="${icons[k as UnitId]}" style="width:40px;height:40px;vertical-align:middle">` : k in ABILITIES ? ABILITIES[k as AbilityId].icon : PASSIVES[k as PassiveId].icon);
 
 function applySettings() {
   setLang(save.lang);
@@ -81,7 +101,8 @@ function showMenu() {
         <div style="margin:-6px 0 14px;color:var(--sand2);font-weight:700">${t('tagline')}</div>
         <div class="menu-buttons">
           <button class="btn play" data-go="play">${t('play')} · ${t('level')} ${num(save.unlocked)}</button>
-          <button class="btn secondary" data-go="campaign">🗺️ ${t('campaign')}</button>
+          <button class="btn secondary" data-go="modes">🏟️ ${t('modes')}</button>
+          <button class="btn secondary" data-go="shop">🛒 ${t('shop')}</button>
           <button class="btn secondary" data-go="upgrades">⚔️ ${t('upgrades')}</button>
           <button class="btn secondary" data-go="rewards">🎁 ${t('daily')}${rewardsBadge() ? ' •' : ''}</button>
           <button class="btn secondary" data-go="settings">⚙️ ${t('settings')}</button>
@@ -93,7 +114,8 @@ function showMenu() {
     unlockAudio(); sfx('click');
     const go = b.dataset.go;
     if (go === 'play') preBattle(save.unlocked);
-    if (go === 'campaign') showCampaign();
+    if (go === 'modes') showModes();
+    if (go === 'shop') showShop('units');
     if (go === 'upgrades') showUpgrades();
     if (go === 'rewards') showRewards();
     if (go === 'settings') showSettings();
@@ -132,17 +154,17 @@ function showCampaign() {
 function showUpgrades() {
   const el = h(`<div class="screen">
     ${topbar()}
-    <div class="cards">${PLAYER_UNITS.map((id) => {
+    <div class="cards">${PLAYER_UNITS.filter((id) => isBase(id) || unitAvailable(id)).map((id) => {
       const d = UNITS[id];
       const lvl = save.unitLevels[id];
-      const locked = save.unlocked < d.unlock;
-      const cost = upgradeCost(lvl);
+      const locked = !unitAvailable(id);
+      const cost = upgradeCost(lvl, id);
       const m = upgradeMult(lvl);
       return `<div class="card ${locked ? 'locked' : ''}">
         <img src="${icons[id]}" alt="">
         <div class="meta">
           <div class="name">${tk('u_' + id)} <span style="color:var(--gold2)">Lv ${num(lvl)}</span></div>
-          <div class="stat">${t('hp')} ${num(Math.round(d.hp * m))} · ${t('dmg')} ${num(Math.round(d.dmg * m))}</div>
+          <div class="stat">${t('hp')} ${num(Math.round(d.hp * m))} · ${d.heal ? '✚ ' + num(Math.round(d.heal * m)) : t('dmg') + ' ' + num(Math.round(d.dmg * m))}</div>
           ${locked ? `<div class="stat">🔒 ${t('unlocksAt')} ${num(d.unlock)}</div>` : ''}
         </div>
         ${locked ? '' : lvl >= MAX_UNIT_LEVEL ? `<span class="chip">${t('max')}</span>` :
@@ -152,7 +174,7 @@ function showUpgrades() {
   </div>`);
   el.querySelectorAll<HTMLElement>('[data-up]').forEach((b) => b.addEventListener('click', () => {
     const id = b.dataset.up as UnitId;
-    const cost = upgradeCost(save.unitLevels[id]);
+    const cost = upgradeCost(save.unitLevels[id], id);
     if (save.gold < cost) return;
     save.gold -= cost;
     save.unitLevels[id]++;
@@ -265,6 +287,130 @@ function showSettings() {
   mount(el);
 }
 
+// ---------------- Modes hub ----------------
+function showModes() {
+  const today = todayStr();
+  const daily = dailyFor(today, save.unlocked);
+  const trophies = CHALLENGES.filter((c) => save.trophies[c.id]).length;
+  const survOpen = save.unlocked > 5 || !!save.stars[5];
+  const dailyOpen = save.unlocked > 3 || !!save.stars[3];
+  const card = (go: string, icon: string, title: string, desc: string, extra: string, locked: string) => `
+    <button class="mode-card ${locked ? 'locked' : ''}" data-go="${go}" ${locked ? 'disabled' : ''}>
+      <div class="mode-ico">${icon}</div><div class="mode-title">${title}</div><div class="mode-desc">${locked || desc}</div><div class="mode-extra">${extra}</div>
+    </button>`;
+  const el = h(`<div class="screen">
+    ${topbar()}
+    <div class="modes-grid">
+      ${card('campaign', '🗺️', t('campaign'), t('campaignDesc'), `⭐ ${num(totalStars())}/120`, '')}
+      ${card('challenges', '🐲', t('challenges'), t('challengesDesc'), `🏆 ${num(trophies)}/${num(CHALLENGES.length)}`, save.unlocked > 6 || save.stars[6] ? '' : `🔒 ${t('needLevel')} ${num(6)}`)}
+      ${card('survival', '♾️', t('survival'), t('survivalDesc'), `${t('best')}: ${num(save.survivalBest)} ${t('waves')}`, survOpen ? '' : `🔒 ${t('needLevel')} ${num(5)}`)}
+      ${card('daily', daily.mod.icon, t('dailyCh'), tk(daily.mod.id), save.dailyDone === today ? t('doneToday') : '💎 25 · 🪙 300', dailyOpen ? '' : `🔒 ${t('needLevel')} ${num(3)}`)}
+    </div>
+  </div>`);
+  el.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => {
+    sfx('click');
+    const go = b.dataset.go;
+    if (go === 'campaign') showCampaign();
+    if (go === 'challenges') showChallenges();
+    if (go === 'survival') startLevel(survivalLevel(), 0);
+    if (go === 'daily') startLevel(daily.level, 0);
+  }));
+  mount(el);
+}
+
+// ---------------- Monster challenges ----------------
+function challengeLock(c: ChallengeDef) {
+  if (!(save.unlocked > c.reqLevel || save.stars[c.reqLevel])) return `🔒 ${t('needLevel')} ${num(c.reqLevel)}`;
+  const missing = (c.reqChallenge ?? []).filter((id) => !save.trophies[id]);
+  if (missing.length) return `🔒 ${t('needChallenge')} ${missing.map((id) => '«' + tk('ch_' + id) + '»').join('، ')}`;
+  return '';
+}
+function showChallenges() {
+  const el = h(`<div class="screen">
+    ${topbar()}
+    <div class="ch-list">${CHALLENGES.map((c) => {
+      const lock = challengeLock(c);
+      const won = save.trophies[c.id] ?? 0;
+      return `<div class="ch-card ${lock ? 'locked' : ''} ${won ? 'won' : ''}">
+        <img class="ch-boss" src="${bossIcons[c.id]}" alt="">
+        <div class="meta">
+          <div class="name">${c.icon} ${tk('ch_' + c.id)} ${won ? '🏆' : ''}</div>
+          <div class="stat">${c.allowed ? `⚠️ ${t('onlyUnits')}: ${c.allowed.map((u) => tk('u_' + u)).join('، ')}` : tk('r_' + c.region)}</div>
+          <div class="stat">${t('unlocks')}: ${c.reward.unlocks.map((k) => `<b style="color:var(--gold2)">${unlockName(k)}</b>`).join(' + ')} · 💎 ${num(c.reward.gems)}</div>
+          ${lock ? `<div class="stat lockmsg">${lock}</div>` : ''}
+        </div>
+        ${lock ? '' : `<button class="btn small" data-ch="${c.id}">⚔️ ${t('fight')}</button>`}
+      </div>`;
+    }).join('')}</div>
+  </div>`);
+  el.querySelectorAll<HTMLElement>('[data-ch]').forEach((b) => b.addEventListener('click', () => { sfx('click'); startLevel(challengeLevel(challengeById(b.dataset.ch!)), 0); }));
+  mount(el);
+}
+
+// ---------------- Shop: units, commander skills, passive boosts ----------------
+type ShopTab = 'units' | 'skills' | 'passives';
+function showShop(tab: ShopTab) {
+  const tabs = (['units', 'skills', 'passives'] as ShopTab[]).map((k) => `<button class="tab ${k === tab ? 'on' : ''}" data-tab="${k}">${t(k === 'passives' ? 'passivesT' : k)}</button>`).join('');
+  let items = '';
+  if (tab === 'units') {
+    items = (Object.keys(UNIT_SHOP) as UnitId[]).map((id) => {
+      const r = UNIT_SHOP[id]!;
+      const d = UNITS[id];
+      const own = save.owned.includes(id);
+      const lock = reqHtml(r);
+      return `<div class="card shop ${own ? 'owned' : ''} ${lock ? 'locked' : ''}">
+        <img src="${icons[id]}" alt="">
+        <div class="meta"><div class="name">${tk('u_' + id)}</div>
+          <div class="stat">${tk('ud_' + id)}</div>
+          <div class="stat">🪙${num(d.cost)} · ${t('hp')} ${num(d.hp)} · ${d.heal ? '✚ ' + num(d.heal) : t('dmg') + ' ' + num(d.dmg)}${d.flying ? ' · 🪽' : ''}</div>
+          ${lock ? `<div class="stat lockmsg">${lock}</div>` : ''}</div>
+        ${own ? `<span class="chip">✓ ${t('owned')}</span>` : lock ? '' : `<button class="btn small" data-buy-unit="${id}" ${canAfford(r) ? '' : 'disabled'}>${priceHtml(r)}</button>`}
+      </div>`;
+    }).join('');
+  } else if (tab === 'skills') {
+    items = (Object.keys(ABILITIES) as AbilityId[]).map((id) => {
+      const a = ABILITIES[id];
+      const own = save.abilities.includes(id);
+      const lock = own ? '' : reqHtml(a.req);
+      const action = own
+        ? (save.ability === id ? `<span class="chip">✓ ${t('equipped')}</span>` : `<button class="btn small secondary" data-equip="${id}">${t('equip')}</button>`)
+        : lock ? '' : `<button class="btn small" data-buy-ab="${id}" ${canAfford(a.req) ? '' : 'disabled'}>${priceHtml(a.req)}</button>`;
+      return `<div class="card shop ${lock ? 'locked' : ''}"><div class="big-ico">${a.icon}</div>
+        <div class="meta"><div class="name">${tk('a_' + id)}</div><div class="stat">${tk('ad_' + id)}</div>${lock ? `<div class="stat lockmsg">${lock}</div>` : ''}</div>${action}</div>`;
+    }).join('');
+  } else {
+    items = (Object.keys(PASSIVES) as PassiveId[]).map((id) => {
+      const p = PASSIVES[id];
+      const lvl = save.passives[id];
+      const lock = reqHtml(p.req);
+      const cost = p.costs[lvl];
+      return `<div class="card shop ${lock ? 'locked' : ''}"><div class="big-ico">${p.icon}</div>
+        <div class="meta"><div class="name">${tk('p_' + id)} <span style="color:var(--gold2)">${'●'.repeat(lvl)}${'○'.repeat(PASSIVE_MAX - lvl)}</span></div><div class="stat">${tk('pd_' + id)}</div>${lock ? `<div class="stat lockmsg">${lock}</div>` : ''}</div>
+        ${lock ? '' : lvl >= PASSIVE_MAX ? `<span class="chip">${t('max')}</span>` : `<button class="btn small" data-buy-p="${id}" ${save.gold >= cost ? '' : 'disabled'}>🪙 ${num(cost)}</button>`}</div>`;
+    }).join('');
+  }
+  const el = h(`<div class="screen">${topbar()}<div class="tabs" style="margin-top:10px">${tabs}</div><div class="cards shop-grid">${items}</div></div>`);
+  el.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => { sfx('click'); showShop(b.dataset.tab as ShopTab); }));
+  const bought = (what: string, price: Requirement) => { sfx('coin'); track('iap_view', { item: what, gold: price.gold ?? 0, gems: price.gems ?? 0 }); persist(); showShop(tab); };
+  el.querySelectorAll<HTMLElement>('[data-buy-unit]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.buyUnit as UnitId; const r = UNIT_SHOP[id]!;
+    if (!reqMet(r) || !canAfford(r) || save.owned.includes(id)) return;
+    pay(r); save.owned.push(id); bought(id, r);
+  }));
+  el.querySelectorAll<HTMLElement>('[data-buy-ab]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.buyAb as AbilityId; const r = ABILITIES[id].req;
+    if (!reqMet(r) || !canAfford(r) || save.abilities.includes(id)) return;
+    pay(r); save.abilities.push(id); save.ability = id; bought(id, r);
+  }));
+  el.querySelectorAll<HTMLElement>('[data-equip]').forEach((b) => b.addEventListener('click', () => { save.ability = b.dataset.equip as AbilityId; sfx('click'); persist(); showShop(tab); }));
+  el.querySelectorAll<HTMLElement>('[data-buy-p]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.buyP as PassiveId; const cost = PASSIVES[id].costs[save.passives[id]];
+    if (!reqMet(PASSIVES[id].req) || save.gold < cost || save.passives[id] >= PASSIVE_MAX) return;
+    save.gold -= cost; save.passives[id]++; bought(id, { gold: cost });
+  }));
+  mount(el);
+}
+
 // ---------------- Pre-battle ----------------
 function boostAdsLeft() {
   const k = 'boost:' + todayStr();
@@ -310,13 +456,16 @@ let tutorialStep = 0;
 
 function stopBattleLoop() { cancelAnimationFrame(raf); battle = null; }
 
-function startBattle(index: number, bonusGold: number) {
-  const L = LEVELS[index - 1];
+function startBattle(index: number, bonusGold: number) { startLevel(LEVELS[index - 1], bonusGold); }
+
+function startLevel(L: LevelDef, bonusGold: number) {
+  const index = L.index;
   stopBattleLoop();
   startMusic(L.boss ? 'boss' : 'battle');
-  track('level_start', { level: index, bonus_gold: bonusGold });
-  battle = new Battle(L, save.unitLevels, 150 + bonusGold, {
+  track('level_start', { level: index, kind: L.kind ?? 'campaign', id: L.id, bonus_gold: bonusGold });
+  battle = new Battle(L, perks(), 150 + bonusGold, {
     onEnd: (win) => setTimeout(() => onBattleEnd(win), 900),
+    onWave: (n) => { if (n % 5 === 0) ui.appendChild(h(`<div class="boss-banner">👑 ${t('wave')} ${num(n)}</div>`)); },
     onUnitTrained: (id) => {
       rolloverDaily();
       save.quests.units++;
@@ -329,7 +478,8 @@ function startBattle(index: number, bonusGold: number) {
   tutorialStep = index === 1 && !save.tutorialDone ? 1 : 0;
   if (tutorialStep) track('tutorial_step', { step: 1 });
   buildHud();
-  if (L.boss) ui.appendChild(h(`<div class="boss-banner">👑 ${tk('b_' + L.region)}</div>`));
+  const banner = L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '';
+  if (banner) ui.appendChild(h(`<div class="boss-banner">${banner}</div>`));
   lastT = performance.now();
   raf = requestAnimationFrame(loop);
 }
@@ -362,17 +512,18 @@ function placeHint() {
 
 function buildHud() {
   const b = battle!;
-  const unlockedUnits = PLAYER_UNITS.filter((id) => UNITS[id].unlock <= Math.max(b.level.index, save.unlocked));
+  const kindLabel = b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
+  const unlockedUnits = PLAYER_UNITS.filter((id) => (b.level.kind === 'campaign' || !b.level.kind ? (isBase(id) ? UNITS[id].unlock <= Math.max(b.level.index, save.unlocked) : unitAvailable(id)) : unitAvailable(id)) && b.isAllowed(id));
   const el = h(`<div class="hud">
     <div class="hud-top">
       <span class="chip gold-chip" style="font-size:20px"><span class="ico">🪙</span><b data-r="gold">0</b></span>
       <span class="chip">⏱ <b data-r="time">0:00</b></span>
       <div class="minimap" data-r="mini"><div class="view" data-r="view"></div></div>
-      <span class="chip">${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}</span>
+      <span class="chip">${kindLabel}</span>
       <button class="btn secondary small" data-a="pause" aria-label="pause">II</button>
     </div>
     <div class="hud-bottom">
-      <div class="units">${PLAYER_UNITS.map((id) => `<button class="ubtn ${unlockedUnits.includes(id) ? '' : 'locked'}" data-u="${id}" aria-label="${tk('u_' + id)}">
+      <div class="units">${PLAYER_UNITS.filter((id) => unlockedUnits.includes(id)).map((id) => `<button class="ubtn ${unlockedUnits.includes(id) ? '' : 'locked'}" data-u="${id}" aria-label="${tk('u_' + id)}">
         <span class="qn" style="display:none"></span><img src="${icons[id]}" alt=""><span class="cost">${num(UNITS[id].cost)}</span><span class="prog"></span></button>`).join('')}</div>
       <div class="grow"></div>
       <button class="cbtn" data-a="ctrl" title="${t('control')}">🎯</button>
@@ -381,7 +532,7 @@ function buildHud() {
         <button class="mbtn" data-m="hold">⛺ ${t('hold')}</button>
         <button class="mbtn on" data-m="defend">🛡 ${t('defend')}</button>
       </div>
-      <button class="abtn" data-a="ability" title="${t('a_volley')}">🏹</button>
+      <button class="abtn" data-a="ability" title="${tk('a_' + save.ability)}">${ABILITIES[save.ability].icon}</button>
     </div>
   </div>`);
   const pads = [
@@ -471,8 +622,11 @@ function updateHud() {
   r.gold.textContent = num(Math.floor(b.gold));
   const s = Math.floor(b.time);
   r.time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const wv = document.querySelector('[data-r="wave"]');
+  if (wv) wv.textContent = num(b.survivalWave);
   for (const id of PLAYER_UNITS) {
     const btn = r.btns[id];
+    if (!btn) continue;
     btn.classList.toggle('cant', !b.canTrain(id));
     const qn = b.queue.filter((q) => q.id === id).length;
     const qe = btn.querySelector<HTMLElement>('.qn')!;
@@ -518,8 +672,9 @@ function pauseMenu() {
   ui.appendChild(el);
   el.querySelector('[data-a="resume"]')!.addEventListener('click', () => { el.remove(); if (battle) { battle.paused = false; lastT = performance.now(); } });
   el.querySelector('[data-a="quit"]')!.addEventListener('click', () => {
+    const L = battle?.level;
     if (battle) track('level_fail', { level: battle.level.index, reason: 'quit', seconds: Math.round(battle.time) });
-    showCampaign(); stopBattleLoop();
+    stopBattleLoop(); if (L) backTo(L); else showCampaign();
   });
 }
 
@@ -537,7 +692,7 @@ function onBattleEnd(win: boolean) {
   sfx(win ? 'win' : 'lose');
   const L = b.level;
   if (!win) {
-    const canRevive = !b.revived;
+    const canRevive = !b.revived && L.kind !== 'survival'; // survival pays out on the spot
     const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result lose col" style="align-items:center">
       <h2>${t('defeat')}</h2>
       ${canRevive ? `<button class="btn ad" data-a="revive">${t('reviveAd')}</button>` : ''}
@@ -552,11 +707,26 @@ function onBattleEnd(win: boolean) {
       startMusic(L.boss ? 'boss' : 'battle');
       lastT = performance.now();
     });
-    el.querySelector('[data-a="retry"]')!.addEventListener('click', () => { fail(); startBattle(L.index, 0); });
+    el.querySelector('[data-a="retry"]')!.addEventListener('click', () => { fail(); startLevel(L, 0); });
     el.querySelector('[data-a="upg"]')!.addEventListener('click', () => { fail(); showUpgrades(); stopBattleLoop(); });
-    el.querySelector('[data-a="menu"]')!.addEventListener('click', () => { fail(); showCampaign(); stopBattleLoop(); });
+    el.querySelector('[data-a="menu"]')!.addEventListener('click', () => { fail(); backTo(L); stopBattleLoop(); });
+    if (L.kind === 'survival') {
+      // Survival always "loses" eventually: show the score instead of a defeat.
+      const waves = b.survivalWave;
+      const best = waves > save.survivalBest;
+      const gold = waves * 30;
+      const gems = best ? Math.max(0, waves - save.survivalBest) : 0;
+      save.gold += gold; save.gems += gems;
+      if (best) save.survivalBest = waves;
+      track('level_complete', { level: L.index, kind: 'survival', waves });
+      persist();
+      $(el, 'h2').innerHTML = `${t('survived')} ${num(waves)} ${t('waves')}${best ? `<div style="font-size:20px;color:var(--ok)">${t('newBest')}</div>` : ''}`;
+      $(el, '.result').classList.remove('lose');
+      $(el, '.result').insertAdjacentHTML('beforeend', `<div class="loot"><span class="chip gold-chip" style="font-size:20px">🪙 ${num(gold)}</span>${gems ? `<span class="chip" style="font-size:20px">💎 ${num(gems)}</span>` : ''}</div>`);
+    }
     return;
   }
+  if (L.kind === 'challenge' || L.kind === 'daily') return onSpecialWin(b);
 
   const stars = b.stars(true);
   const prev = save.stars[L.index] ?? 0;
@@ -606,6 +776,45 @@ function onBattleEnd(win: boolean) {
   el.querySelector('[data-a="menu"]')!.addEventListener('click', () => leave(() => showCampaign()));
 }
 
+function backTo(L: LevelDef) {
+  if (L.kind === 'challenge') showChallenges();
+  else if (L.kind === 'survival' || L.kind === 'daily') showModes();
+  else showCampaign();
+}
+
+function onSpecialWin(b: Battle) {
+  const L = b.level;
+  let gold = 0, gems = 0;
+  let unlocked: string[] = [];
+  if (L.kind === 'challenge') {
+    const c = challengeById(L.id!);
+    const first = !save.trophies[c.id];
+    save.trophies[c.id] = (save.trophies[c.id] ?? 0) + 1;
+    gold = first ? c.reward.gold : Math.round(c.reward.gold * 0.4);
+    gems = first ? c.reward.gems : 0;
+    // Winning the challenge grants the right to buy its units/skills; passives unlock outright.
+    if (first) unlocked = c.reward.unlocks;
+  } else {
+    const first = save.dailyDone !== todayStr();
+    gold = first ? 300 : 80;
+    gems = first ? 25 : 0;
+    save.dailyDone = todayStr();
+  }
+  save.gold += gold; save.gems += gems;
+  rolloverDaily(); save.quests.wins++;
+  track('level_complete', { level: L.index, kind: L.kind, id: L.id, seconds: Math.round(b.time) });
+  persist();
+  const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result col" style="align-items:center">
+    <h2>${t('victory')} ${L.kind === 'challenge' ? '🏆' : ''}</h2>
+    <div class="loot"><span class="chip gold-chip" style="font-size:22px">🪙 ${num(gold)}</span>${gems ? `<span class="chip" style="font-size:22px">💎 ${num(gems)}</span>` : ''}</div>
+    ${unlocked.length ? `<div class="unlock-box"><div style="font-weight:900;color:var(--gold2)">✨ ${t('newUnlock')}</div>${unlocked.map((k) => `<div>${unlockIcon(k)} ${unlockName(k)}</div>`).join('')}</div>` : ''}
+    <div class="row">${unlocked.length ? `<button class="btn" data-a="shop">🛒 ${t('shop')}</button>` : ''}<button class="btn secondary" data-a="back">${t('continue')}</button></div>
+  </div></div>`);
+  ui.appendChild(el);
+  el.querySelector('[data-a="shop"]')?.addEventListener('click', () => { stopBattleLoop(); showShop(unlocked.some((k) => k in UNITS) ? 'units' : unlocked.some((k) => k in ABILITIES) ? 'skills' : 'passives'); });
+  el.querySelector('[data-a="back"]')!.addEventListener('click', () => { stopBattleLoop(); flushEvents(); backTo(L); });
+}
+
 // ---------------- boot ----------------
 function onResize() { renderer.resize(); if (battle) renderer.clampCam(); else drawIdle(); }
 function drawIdle() { /* menus use CSS backgrounds */ const c = canvas.getContext('2d')!; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, canvas.width, canvas.height); }
@@ -619,4 +828,4 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();
 });
 // Dev-only hook for automated UI tests.
-if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, save, startBattle };
+if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, save, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges };

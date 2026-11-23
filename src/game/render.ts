@@ -1,14 +1,15 @@
 import { Battle, W, H, GROUND, CASTLE_X, MINE_X, type Unit } from './battle';
 import type { RegionId } from '../data/levels';
+import { drawArt } from './art';
 
 const INK = '#16120e';
 const TEAM = ['#e0a82e', '#9e1f1f'];
 
 interface Theme { sky: [string, string]; far: string; mid: string; ground: string; ground2: string; }
 const THEMES: Record<RegionId, Theme> = {
-  oasis: { sky: ['#7fc8e8', '#f6e3b0'], far: '#d9b77a', mid: '#c99e5c', ground: '#e8c98a', ground2: '#d4ad6a' },
-  dunes: { sky: ['#e9875a', '#f7c98b'], far: '#c8643c', mid: '#b5532f', ground: '#dc9a5e', ground2: '#c47f45' },
-  mountains: { sky: ['#8fb3c9', '#e3ddc8'], far: '#8a8378', mid: '#6f685e', ground: '#bfae8e', ground2: '#a79574' },
+  oasis: { sky: ['#5fbff0', '#d8f1ff'], far: '#e3c07f', mid: '#8fbf5a', ground: '#f0d394', ground2: '#9cc864' },
+  dunes: { sky: ['#f08a4b', '#ffd79a'], far: '#c8643c', mid: '#b5532f', ground: '#dc9a5e', ground2: '#c47f45' },
+  mountains: { sky: ['#7ec4e8', '#eef6f0'], far: '#9a9488', mid: '#7aa05a', ground: '#bfae8e', ground2: '#a79574' },
   shadow: { sky: ['#141a38', '#4a3f6b'], far: '#2a2748', mid: '#3a3560', ground: '#8f87a6', ground2: '#7a7294' },
 };
 
@@ -73,7 +74,7 @@ export class Renderer {
     this.drawMine(MINE_X[0]);
     this.drawMine(MINE_X[1]);
     this.drawCastle(0, b.castleHp[0] / b.castleMax[0], b.level.region);
-    this.drawCastle(1, b.castleHp[1] / b.castleMax[1], b.level.region);
+    this.drawCastle(1, isFinite(b.castleHp[1]) ? b.castleHp[1] / b.castleMax[1] : 1, b.level.region, !isFinite(b.castleHp[1]));
 
     // formation marker
     const markX = b.mode === 'defend' ? CASTLE_X[0] + 220 : b.mode === 'hold' ? W / 2 - 80 : -1;
@@ -89,6 +90,8 @@ export class Renderer {
       c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.vy, p.vx));
       if (p.kind === 'arrow') { c.strokeStyle = INK; c.lineWidth = 2; c.beginPath(); c.moveTo(-12, 0); c.lineTo(8, 0); c.stroke(); c.fillStyle = INK; c.beginPath(); c.moveTo(10, 0); c.lineTo(5, -3); c.lineTo(5, 3); c.fill(); }
       else if (p.kind === 'rock') { c.fillStyle = '#7a6a55'; c.strokeStyle = INK; c.lineWidth = 2; c.beginPath(); c.arc(0, 0, 9, 0, 7); c.fill(); c.stroke(); }
+      else if (p.kind === 'fire') { c.globalCompositeOperation = 'lighter'; c.fillStyle = 'rgba(255,140,40,.9)'; c.beginPath(); c.arc(0, 0, 7, 0, 7); c.fill(); c.fillStyle = 'rgba(255,220,90,.9)'; c.beginPath(); c.arc(2, 0, 4, 0, 7); c.fill(); c.globalCompositeOperation = 'source-over'; }
+      else if (p.kind === 'meteor') { c.shadowColor = '#ff7a2d'; c.shadowBlur = 24; c.fillStyle = '#ff9a3d'; c.beginPath(); c.arc(0, 0, 16, 0, 7); c.fill(); c.fillStyle = '#5a3a22'; c.beginPath(); c.arc(4, 0, 10, 0, 7); c.fill(); c.shadowBlur = 0; c.fillStyle = 'rgba(255,160,60,.5)'; c.beginPath(); c.moveTo(-10, -12); c.lineTo(-60, 0); c.lineTo(-10, 12); c.fill(); }
       else { c.fillStyle = '#c77dff'; c.shadowColor = '#c77dff'; c.shadowBlur = 12; c.beginPath(); c.arc(0, 0, 6, 0, 7); c.fill(); c.shadowBlur = 0; }
       c.restore();
     }
@@ -172,7 +175,7 @@ export class Renderer {
     for (const [dx, dy] of [[-20, -18], [6, -34], [22, -14], [-4, -10]]) { c.beginPath(); c.moveTo(x + dx, GROUND + dy - 5); c.lineTo(x + dx + 5, GROUND + dy); c.lineTo(x + dx, GROUND + dy + 5); c.lineTo(x + dx - 5, GROUND + dy); c.fill(); }
   }
 
-  private drawCastle(side: 0 | 1, pct: number, region: RegionId) {
+  private drawCastle(side: 0 | 1, pct: number, region: RegionId, invulnerable = false) {
     const c = this.ctx;
     const x = CASTLE_X[side];
     const f = side === 0 ? 1 : -1;
@@ -207,238 +210,64 @@ export class Renderer {
     // hp bar
     const bw = 150;
     c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(x - bw / 2 - 2, GROUND - 318, bw + 4, 14);
-    c.fillStyle = pct > 0.5 ? '#5cc85c' : pct > 0.25 ? '#e8b730' : '#e0453a';
+    c.fillStyle = invulnerable ? '#a46cff' : pct > 0.5 ? '#5cc85c' : pct > 0.25 ? '#e8b730' : '#e0453a';
     c.fillRect(x - bw / 2, GROUND - 316, bw * Math.max(0, pct), 10);
-  }
-
-  private limb(x1: number, y1: number, len: number, ang: number) {
-    const x2 = x1 + Math.cos(ang) * len, y2 = y1 + Math.sin(ang) * len;
-    const c = this.ctx;
-    c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
-    return [x2, y2] as const;
   }
 
   drawUnit(u: Unit, b: Battle) {
     const c = this.ctx;
-    const id = u.def.id;
     const f = u.side === 0 ? 1 : -1;
-    const bossKind = id === 'boss' ? b.level.region : null;
-    const gy = GROUND + u.lane;
-    const h = u.def.height;
+    const gy = b.unitY ? b.unitY(u) : GROUND + u.lane;
+    const groundY = GROUND + u.lane;
     c.save();
+    // soft ground shadow (flying units too, so you can read their position)
+    c.fillStyle = 'rgba(60,35,10,.22)';
+    const sw = Math.min(70, u.def.height * 0.45) * (u.def.flying ? 0.7 : 1);
+    c.beginPath(); c.ellipse(u.x, groundY + 2, sw, sw * 0.18, 0, 0, 7); c.fill();
+    if (u === b.controlled) {
+      c.strokeStyle = 'rgba(255,224,102,.85)'; c.lineWidth = 3; c.beginPath(); c.ellipse(u.x, groundY + 2, 26, 7, 0, 0, 7); c.stroke();
+      c.fillStyle = '#ffe066';
+      const my = gy - u.def.height - 30 + Math.sin(performance.now() / 150) * 4;
+      c.beginPath(); c.moveTo(u.x, my + 12); c.lineTo(u.x - 9, my); c.lineTo(u.x + 9, my); c.closePath(); c.fill();
+    }
     if (u.dead) {
       c.globalAlpha = Math.max(0, 1 - u.dead / 1.2);
-      c.translate(u.x, gy); c.rotate(-f * Math.min(1.5, u.dead * 4)); c.translate(-u.x, -gy);
+      c.translate(u.x, groundY); c.rotate(-f * Math.min(1.5, u.dead * 4)); c.translate(-u.x, -groundY);
     }
-    if (id === 'ghost' || bossKind === 'shadow') c.globalAlpha *= 0.78;
-    c.strokeStyle = u.hitFlash > 0 ? '#fff' : INK;
-    c.lineCap = 'round'; c.lineJoin = 'round';
-    const lw = Math.max(3, h / 12);
-    c.lineWidth = lw;
+    if (u.hitFlash > 0) c.filter = 'brightness(1.8)';
     const swing = u.moving ? Math.sin(u.anim) * 0.55 : 0;
     const atk = u.attacking > 0 ? Math.sin((1 - u.attacking / 0.3) * Math.PI) : 0;
-    const team = TEAM[u.side];
-
-    // controlled marker
-    if (u === b.controlled) {
-      c.fillStyle = '#ffe066';
-      const my = gy - h - 30 + Math.sin(performance.now() / 150) * 4;
-      c.beginPath(); c.moveTo(u.x, my + 12); c.lineTo(u.x - 9, my); c.lineTo(u.x + 9, my); c.closePath(); c.fill();
-      c.globalAlpha *= 1; c.strokeStyle = 'rgba(255,224,102,.6)'; c.lineWidth = 3; c.beginPath(); c.ellipse(u.x, gy + 2, 22, 6, 0, 0, 7); c.stroke();
-      c.strokeStyle = u.hitFlash > 0 ? '#fff' : INK; c.lineWidth = lw;
-    }
-
-    if (id === 'camel') { this.drawCamel(u, f, gy, swing, atk, team); c.restore(); this.hpBar(u, gy); return; }
-    if (id === 'catapult') { this.drawCatapult(u, f, gy, atk, team); c.restore(); this.hpBar(u, gy); return; }
-    if (id === 'golem' || bossKind === 'mountains') { this.drawGolem(u, f, gy, swing, atk, bossKind === 'mountains'); c.restore(); this.hpBar(u, gy); return; }
-    if (bossKind === 'dunes') { this.drawScorpion(u, f, gy, swing, atk); c.restore(); this.hpBar(u, gy); return; }
-
-    const x = u.x;
-    const hip = gy - h * 0.42;
-    const sh = gy - h * 0.72;
-    const headR = h * 0.13;
-    const legL = h * 0.44;
-    // legs / robe / ghost tail
-    if (id === 'ghost' || bossKind === 'shadow') {
-      c.fillStyle = 'rgba(207,224,255,.75)';
-      c.beginPath(); c.moveTo(x - h * 0.18, hip); c.quadraticCurveTo(x - f * 6 + Math.sin(u.anim) * 8, gy, x - f * h * 0.45, gy - 4); c.lineTo(x + h * 0.2, hip); c.closePath(); c.fill();
-    } else if (id === 'sandmage') {
-      c.fillStyle = '#5a2a6e';
-      c.beginPath(); c.moveTo(x, sh); c.lineTo(x - h * 0.22, gy); c.lineTo(x + h * 0.22, gy); c.closePath(); c.fill(); c.stroke();
-    } else {
-      this.limb(x, hip, legL, Math.PI / 2 + swing);
-      this.limb(x, hip, legL, Math.PI / 2 - swing);
-    }
-    // body
-    c.beginPath(); c.moveTo(x, hip); c.lineTo(x, sh - h * 0.04); c.stroke();
-    // head
-    c.fillStyle = id === 'ghost' || bossKind === 'shadow' ? '#dfe8ff' : INK;
-    c.beginPath(); c.arc(x, sh - headR - h * 0.03, headR, 0, 7); c.fill();
-    // headgear: turban / headscarf in team colour
-    c.fillStyle = team;
-    if (id === 'bandit' || bossKind === 'oasis') {
-      c.fillRect(x - headR, sh - headR * 1.25 - h * 0.03, headR * 2, headR * 0.55);
-      c.beginPath(); c.moveTo(x - f * headR, sh - headR - h * 0.03); c.lineTo(x - f * headR * 2.2, sh - headR * 0.4); c.lineTo(x - f * headR, sh - headR * 0.6); c.fill();
-    } else if (id !== 'ghost' && bossKind !== 'shadow') {
-      c.beginPath(); c.ellipse(x, sh - headR * 1.75 - h * 0.03, headR * 1.05, headR * 0.6, 0, Math.PI, 0); c.fill();
-    }
-    if (id === 'boss') { // crown
-      c.fillStyle = '#ffd34d';
-      const cy = sh - headR * 2.3 - h * 0.03;
-      c.beginPath(); c.moveTo(x - headR, cy + 8); c.lineTo(x - headR, cy - 6); c.lineTo(x - headR / 2, cy); c.lineTo(x, cy - 10); c.lineTo(x + headR / 2, cy); c.lineTo(x + headR, cy - 6); c.lineTo(x + headR, cy + 8); c.closePath(); c.fill();
-    }
-    // arms + weapon
-    const armL = h * 0.3;
-    this.limb(x, sh, armL, Math.PI / 2 - f * (0.4 - swing * 0.5));
-    switch (id) {
-      case 'miner': {
-        const a0 = -1.3 + atk * 1.8;
-        const a = f > 0 ? a0 : Math.PI - a0;
-        const [hx, hy] = this.limb(x, sh, armL, a);
-        this.weaponLine(hx, hy, a, h * 0.38, '#6d4c2a');
-        const tx = hx + Math.cos(a) * h * 0.38, ty = hy + Math.sin(a) * h * 0.38;
-        const px = Math.cos(a + Math.PI / 2) * 9, py = Math.sin(a + Math.PI / 2) * 9;
-        c.strokeStyle = '#666'; c.lineWidth = lw;
-        c.beginPath(); c.moveTo(tx - px, ty - py); c.lineTo(tx + px, ty + py); c.stroke();
-        break;
-      }
-      case 'archer': {
-        const ang = f > 0 ? -0.15 : Math.PI + 0.15;
-        const [hx, hy] = this.limb(x, sh, armL * 1.05, ang);
-        c.strokeStyle = '#6d4c2a'; c.lineWidth = lw * 0.8;
-        c.beginPath(); c.arc(hx, hy, h * 0.26, f > 0 ? -1.2 : Math.PI - 1.2 + 0.4, f > 0 ? 1.2 : Math.PI + 1.2 - 0.4); c.stroke();
-        c.strokeStyle = INK; c.lineWidth = 1.2;
-        const pull = atk * 10;
-        c.beginPath(); c.moveTo(hx + Math.cos(f > 0 ? -1.2 : Math.PI + 1.2) * h * 0.26, hy - h * 0.24); c.lineTo(hx - f * (8 + pull), hy); c.lineTo(hx + Math.cos(f > 0 ? 1.2 : Math.PI - 1.2) * h * 0.26, hy + h * 0.24); c.stroke();
-        break;
-      }
-      case 'spear': {
-        const ang = f > 0 ? 0.05 : Math.PI - 0.05;
-        const [hx, hy] = this.limb(x, sh, armL * (1 + atk * 0.4), ang);
-        this.weaponLine(hx - f * h * 0.5, hy, ang, h * 1.25, '#6d4c2a');
-        c.fillStyle = '#ccc'; c.beginPath(); const tx = hx + f * h * 0.75; c.moveTo(tx, hy - 5); c.lineTo(tx + f * 14, hy); c.lineTo(tx, hy + 5); c.fill();
-        // shield
-        c.fillStyle = team; c.strokeStyle = INK; c.lineWidth = 3;
-        c.beginPath(); c.ellipse(x + f * h * 0.2, hip - h * 0.08, h * 0.13, h * 0.26, 0, 0, 7); c.fill(); c.stroke();
-        break;
-      }
-      case 'sandmage': {
-        const ang = -Math.PI / 2 + f * (0.9 - atk * 0.6);
-        const [hx, hy] = this.limb(x, sh, armL, f > 0 ? ang : -Math.PI - ang);
-        this.weaponLine(hx, hy + h * 0.3, -Math.PI / 2, h * 0.7, '#6d4c2a');
-        c.fillStyle = '#c77dff'; c.shadowColor = '#c77dff'; c.shadowBlur = 10 + atk * 10;
-        c.beginPath(); c.arc(hx, hy - h * 0.42, 5 + atk * 3, 0, 7); c.fill(); c.shadowBlur = 0;
-        break;
-      }
-      default: { // sword, bandit, ghost, boss
-        const raise = -Math.PI / 2 + f * (1.1 - atk * 2.0);
-        const ang = f > 0 ? raise : -Math.PI - raise;
-        const [hx, hy] = this.limb(x, sh, armL, ang);
-        const blade = id === 'boss' ? h * 0.6 : h * 0.42;
-        const bang = f > 0 ? raise - 0.9 + atk * 0.6 : -Math.PI - raise + 0.9 - atk * 0.6;
-        c.strokeStyle = id === 'ghost' ? '#9fd8ff' : '#d7d7d7'; c.lineWidth = lw * 0.9;
-        c.beginPath(); c.moveTo(hx, hy); c.lineTo(hx + Math.cos(bang) * blade, hy + Math.sin(bang) * blade); c.stroke();
-        c.strokeStyle = INK; c.lineWidth = lw * 0.6; c.beginPath(); c.moveTo(hx + Math.cos(bang + 1.57) * 5, hy + Math.sin(bang + 1.57) * 5); c.lineTo(hx - Math.cos(bang + 1.57) * 5, hy - Math.sin(bang + 1.57) * 5); c.stroke();
-      }
+    drawArt({ c, u, x: u.x, gy, f, t: performance.now() / 1000, swing, atk, side: u.side, region: b.level.region, flash: u.hitFlash > 0 });
+    c.filter = 'none';
+    if (u.healFx > 0) {
+      c.fillStyle = `rgba(125,255,154,${u.healFx})`; c.font = 'bold 16px system-ui'; c.textAlign = 'center';
+      c.fillText('+', u.x - 8, gy - u.def.height - 6 - (1 - u.healFx) * 14); c.fillText('+', u.x + 9, gy - u.def.height - (1 - u.healFx) * 20);
     }
     c.restore();
     this.hpBar(u, gy);
   }
 
   /** Renders a unit portrait for HUD buttons (reuses the in-game drawing code). */
-  static icon(def: Unit['def'], size = 96): string {
+  static icon(def: Unit['def'], size = 96, side: 0 | 1 = 0): string {
     const cv = document.createElement('canvas');
     cv.width = size; cv.height = size;
-    const r = new Renderer(cv);
     const ctx = cv.getContext('2d')!;
-    const s = size / (def.height * 1.55 + 10);
-    ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 4) * s);
-    const u: Unit = { uid: 0, def, side: 0, x: 60, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 0, moving: false, attacking: 0, chargeReady: false, mineTimer: 0, defending: false, dead: 0, hitFlash: 0 };
-    r.drawUnit(u, { controlled: null, level: { region: 'oasis' } } as unknown as Battle);
+    const h = def.flying ? def.height + 40 : def.height;
+    const wide = ['camel', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss'].includes(def.id) ? 1.5 : 1;
+    const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
+    ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
+    const u: Unit = { uid: 0, def, side, x: 60 - (def.id === 'camel' ? 8 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0 };
+    const y = def.flying ? GROUND - 30 : GROUND;
+    drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 0, swing: 0, atk: 0, side, region: 'oasis', flash: false });
     return cv.toDataURL();
-  }
-
-  private weaponLine(x: number, y: number, ang: number, len: number, color: string) {
-    const c = this.ctx;
-    const prev = c.strokeStyle, lw = c.lineWidth;
-    c.strokeStyle = color; c.lineWidth = Math.max(2, lw * 0.7);
-    c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len); c.stroke();
-    c.strokeStyle = prev; c.lineWidth = lw;
-  }
-
-  private drawCamel(u: Unit, f: number, gy: number, swing: number, atk: number, team: string) {
-    const c = this.ctx; const x = u.x;
-    c.fillStyle = '#c89b5a'; c.lineWidth = 3;
-    // legs
-    for (const [dx, s] of [[-14, swing], [-6, -swing], [12, -swing], [20, swing]] as [number, number][]) this.limb(x + f * dx, gy - 26, 26, Math.PI / 2 + s * 0.6);
-    // body + hump
-    c.beginPath(); c.ellipse(x + f * 3, gy - 30, 26, 11, 0, 0, 7); c.fill(); c.stroke();
-    c.beginPath(); c.ellipse(x - f * 2, gy - 40, 12, 9, 0, Math.PI, 0); c.fill(); c.stroke();
-    // neck + head
-    c.lineWidth = 5; c.strokeStyle = c.strokeStyle;
-    c.beginPath(); c.moveTo(x + f * 24, gy - 32); c.quadraticCurveTo(x + f * 40, gy - 34, x + f * 38, gy - 52); c.stroke();
-    c.lineWidth = 3; c.beginPath(); c.ellipse(x + f * 43, gy - 54, 8, 5, 0, 0, 7); c.fill(); c.stroke();
-    // saddle cloth
-    c.fillStyle = team; c.fillRect(x - f * 14 - (f < 0 ? 18 : 0), gy - 42, 18, 8);
-    // rider
-    const sy = gy - 46;
-    c.lineWidth = 3;
-    c.beginPath(); c.moveTo(x - f * 4, sy); c.lineTo(x - f * 4, sy - 18); c.stroke();
-    c.fillStyle = '#16120e'; c.beginPath(); c.arc(x - f * 4, sy - 25, 6, 0, 7); c.fill();
-    c.fillStyle = team; c.beginPath(); c.ellipse(x - f * 4, sy - 30, 7, 4, 0, Math.PI, 0); c.fill();
-    const raise = -Math.PI / 2 + f * (1.0 - atk * 2);
-    const ang = f > 0 ? raise : -Math.PI - raise;
-    const [hx, hy] = this.limb(x - f * 4, sy - 15, 11, ang);
-    c.strokeStyle = '#d7d7d7'; c.beginPath(); c.moveTo(hx, hy); const ba = ang - f * 0.6; c.lineTo(hx + Math.cos(ba) * 22, hy + Math.sin(ba) * 22); c.stroke();
-  }
-
-  private drawCatapult(u: Unit, f: number, gy: number, atk: number, team: string) {
-    const c = this.ctx; const x = u.x;
-    c.fillStyle = '#8a5a2b'; c.lineWidth = 3;
-    c.fillRect(x - 26, gy - 20, 52, 9); c.strokeRect(x - 26, gy - 20, 52, 9);
-    c.fillStyle = '#5c3b1c';
-    for (const dx of [-17, 17]) { c.beginPath(); c.arc(x + dx, gy - 8, 8, 0, 7); c.fill(); c.stroke(); }
-    c.beginPath(); c.moveTo(x - f * 4, gy - 20); c.lineTo(x + f * 6, gy - 40); c.lineTo(x + f * 14, gy - 20); c.stroke();
-    const arm = f > 0 ? -2.6 + atk * 1.8 : -0.54 - atk * 1.8;
-    c.strokeStyle = '#6d4c2a'; c.lineWidth = 4;
-    c.beginPath(); c.moveTo(x + f * 6, gy - 38); c.lineTo(x + f * 6 + Math.cos(arm) * 32, gy - 38 + Math.sin(arm) * 32); c.stroke();
-    c.fillStyle = team; c.fillRect(x - 6, gy - 18, 12, 5);
-  }
-
-  private drawGolem(u: Unit, f: number, gy: number, swing: number, atk: number, king: boolean) {
-    const c = this.ctx; const x = u.x; const s = u.def.height / 58;
-    c.fillStyle = king ? '#6e6b7a' : '#8a8478'; c.lineWidth = 3;
-    const r = (dx: number, dy: number, w: number, h: number) => { c.fillRect(x + dx * s - (w * s) / 2, gy + dy * s, w * s, h * s); c.strokeRect(x + dx * s - (w * s) / 2, gy + dy * s, w * s, h * s); };
-    r(-8 + swing * 6, -20, 12, 20); r(8 - swing * 6, -20, 12, 20);
-    r(0, -48, 34, 30);
-    r(0, -62, 18, 14);
-    r(f * (22 + atk * 10), -46 + atk * -6, 12, 26);
-    c.fillStyle = '#ffb347'; c.fillRect(x + f * 3 * s - 2, gy - 57 * s, 4, 4);
-    if (king) { c.fillStyle = '#ffd34d'; c.beginPath(); const cy = gy - 62 * s; c.moveTo(x - 9 * s, cy); c.lineTo(x - 9 * s, cy - 10 * s); c.lineTo(x - 3 * s, cy - 4 * s); c.lineTo(x, cy - 12 * s); c.lineTo(x + 3 * s, cy - 4 * s); c.lineTo(x + 9 * s, cy - 10 * s); c.lineTo(x + 9 * s, cy); c.fill(); }
-  }
-
-  private drawScorpion(u: Unit, f: number, gy: number, swing: number, atk: number) {
-    const c = this.ctx; const x = u.x;
-    c.fillStyle = '#7a2e1a'; c.lineWidth = 3;
-    for (let i = 0; i < 4; i++) { this.limb(x - f * (10 - i * 12), gy - 18, 22, Math.PI / 2 + (i % 2 ? swing : -swing) * 0.5 - f * 0.5); this.limb(x - f * (10 - i * 12), gy - 18, 22, Math.PI / 2 + (i % 2 ? -swing : swing) * 0.5 + f * 0.4); }
-    c.beginPath(); c.ellipse(x, gy - 22, 44, 16, 0, 0, 7); c.fill(); c.stroke();
-    // tail
-    c.lineWidth = 9; c.strokeStyle = '#7a2e1a';
-    c.beginPath(); c.moveTo(x - f * 38, gy - 26); c.quadraticCurveTo(x - f * 70, gy - 90, x - f * 20 + f * atk * 40, gy - 96 + atk * 40); c.stroke();
-    c.lineWidth = 3; c.strokeStyle = '#16120e';
-    c.fillStyle = '#ffd34d'; c.beginPath(); c.arc(x - f * 20 + f * atk * 40, gy - 96 + atk * 40, 7, 0, 7); c.fill(); c.stroke();
-    // claws
-    c.fillStyle = '#7a2e1a';
-    c.beginPath(); c.ellipse(x + f * 56, gy - 28, 13, 8, 0, 0, 7); c.fill(); c.stroke();
-    c.fillStyle = '#ffd34d'; c.fillRect(x + f * 30 - 2, gy - 34, 5, 5);
   }
 
   private hpBar(u: Unit, gy: number) {
     if (u.dead || u.hp >= u.maxHp) return;
     const c = this.ctx;
-    const w = u.def.id === 'boss' ? 90 : 30;
+    const w = u.def.boss ? 100 : 32;
     const y = gy - u.def.height - 14;
-    c.fillStyle = 'rgba(0,0,0,.5)'; c.fillRect(u.x - w / 2, y, w, 5);
+    c.fillStyle = 'rgba(0,0,0,.5)'; c.fillRect(u.x - w / 2 - 1, y - 1, w + 2, 7);
     c.fillStyle = u.side === 0 ? '#5cc85c' : '#e0453a'; c.fillRect(u.x - w / 2, y, (w * Math.max(0, u.hp)) / u.maxHp, 5);
   }
 }

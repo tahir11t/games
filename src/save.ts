@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { UnitId } from './data/units';
+import type { AbilityId, PassiveId, ChallengeId } from './data/skills';
 import type { Lang } from './i18n';
 
 export interface SaveData {
@@ -18,10 +19,23 @@ export interface SaveData {
   quests: { date: string; wins: number; archers: number; units: number; claimed: string[] };
   battlesSinceInterstitial: number;
   tutorialDone: boolean;
+  owned: UnitId[]; // bought shop units
+  trophies: Partial<Record<ChallengeId, number>>; // challenge -> times won
+  abilities: AbilityId[];
+  ability: AbilityId;
+  passives: Record<PassiveId, number>;
+  survivalBest: number;
+  dailyDone: string | null;
   updatedAt: number;
 }
 
 const KEY = 'sandwars.save.v1';
+
+/** Fill in fields added after a save was written (shallow + nested maps). */
+export function migrate(raw: Partial<SaveData>): SaveData {
+  const d = defaultSave();
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies } };
+}
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function defaultSave(): SaveData {
@@ -33,7 +47,7 @@ export function defaultSave(): SaveData {
     gems: 0,
     stars: {},
     unlocked: 1,
-    unitLevels: { miner: 1, sword: 1, archer: 1, spear: 1, camel: 1, catapult: 1 },
+    unitLevels: { miner: 1, sword: 1, archer: 1, spear: 1, camel: 1, catapult: 1, healer: 1, falcon: 1, fire: 1, lion: 1, assassin: 1, giant: 1, genie: 1, hero: 1 },
     daily: { day: 0, lastClaim: null },
     chestAt: Date.now(),
     chestAdsToday: 0,
@@ -41,6 +55,13 @@ export function defaultSave(): SaveData {
     quests: { date: today(), wins: 0, archers: 0, units: 0, claimed: [] },
     battlesSinceInterstitial: 0,
     tutorialDone: false,
+    owned: [],
+    trophies: {},
+    abilities: ['volley'],
+    ability: 'volley',
+    passives: { mining: 0, walls: 0, treasury: 0, eagle: 0, wisdom: 0 },
+    survivalBest: 0,
+    dailyDone: null,
     updatedAt: Date.now(),
   };
 }
@@ -62,7 +83,7 @@ function decode(raw: string): SaveData | null {
   try {
     const json = decodeURIComponent(escape(atob(b64)));
     if (checksum(json + SALT) !== sum) return null;
-    return { ...defaultSave(), ...JSON.parse(json) };
+    return migrate(JSON.parse(json));
   } catch {
     return null;
   }
@@ -114,7 +135,7 @@ export async function initCloud(onMerged: () => void) {
     const { data } = await sb.from('player_saves').select('data').eq('user_id', userId).maybeSingle();
     const remote = data?.data as SaveData | undefined;
     if (remote && remote.updatedAt > save.updatedAt) {
-      save = { ...defaultSave(), ...remote };
+      save = migrate(remote);
       try { localStorage.setItem(KEY, encode(save)); } catch { /* ignore */ }
       onMerged();
     } else {
