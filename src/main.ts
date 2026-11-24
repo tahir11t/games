@@ -741,7 +741,9 @@ function startLevel(L: LevelDef, bonusGold: number) {
   track('level_start', { level: index, kind: L.kind ?? 'campaign', id: L.id, bonus_gold: bonusGold });
   renderer.playerArmy = armyFor(L);
   battle = new Battle(L, perks(L), 150 + bonusGold, {
-    onEnd: (win) => setTimeout(() => onBattleEnd(win), 900),
+    onEnd: (win) => setTimeout(() => onBattleEnd(win), 1600),
+    onStreak: (n, bonus) => { const k = n >= 12 ? 'st_godlike' : n >= 8 ? 'st_rampage' : n >= 5 ? 'st_mega' : 'st_triple'; ui.appendChild(h(`<div class="streak">${t(k as Key)} <small>+${num(bonus)} 🪙</small></div>`)); setTimeout(() => document.querySelector('.streak')?.remove(), 1600); sfx('rank'); },
+    onRage: () => { ui.appendChild(h(`<div class="boss-banner rage">🔥 ${t('rageMode')}</div>`)); sfx('volley'); },
     onWave: (n) => { if (n % 5 === 0) ui.appendChild(h(`<div class="boss-banner">👑 ${t('wave')} ${num(n)}</div>`)); if (n % 3 === 0) setTimeout(() => skillCards(), 400); },
     onRush: () => { ui.appendChild(h(`<div class="boss-banner rush">⚡ ${t('goldRush')}</div>`)); sfx('coin'); },
     onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
@@ -830,6 +832,7 @@ function buildHud() {
       <span class="chip">⏱ <b data-r="time">0:00</b></span>
       <div class="minimap" data-r="mini"><canvas data-r="minic"></canvas></div>
       <button class="btn secondary small" data-a="follow" title="${t('follow')}">📍</button>
+      <div class="boss-bar" data-r="bossbar" style="display:none"><b data-r="bossname"></b><div><i data-r="bosshp"></i></div></div>
       <span class="chip army-count" title="army">🛡️ <b data-r="myn">0</b> <i>⚔</i> <b data-r="en">0</b> 💀</span>
       <span class="chip">${kindLabel}</span>
       <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">▶${save.speed === 2 ? '▶' : ''} ×${save.speed}</button>
@@ -1011,6 +1014,13 @@ function updateHud() {
   if (cd && b.level.winAfter) cd.textContent = num(Math.max(0, Math.ceil(b.level.winAfter - b.time)));
   const wv = document.querySelector('[data-r="wave"]');
   if (wv) wv.textContent = num(b.survivalWave);
+  // boss health bar
+  const boss = b.units.find((u) => u.side === 1 && !u.dead && u.def.boss);
+  const bb = document.querySelector<HTMLElement>('[data-r="bossbar"]');
+  if (bb) {
+    bb.style.display = boss ? '' : 'none';
+    if (boss) { bb.querySelector('[data-r="bossname"]')!.textContent = `👑 ${tk('u_' + boss.def.id) !== 'u_' + boss.def.id ? tk('u_' + boss.def.id) : tk('b_' + b.level.region)}`; (bb.querySelector('[data-r="bosshp"]') as HTMLElement).style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`; }
+  }
   // page dots glow when a unit on that page is ready to train
   if (unitPages && unitPages.pages > 1) {
     const ready = new Array(unitPages.pages).fill(false);
@@ -1068,6 +1078,7 @@ function loop(now: number) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   for (let k = 0; k < save.speed; k++) battle.update(dt);
+  if (battle.over) battle.finaleTick(dt);
   if (camHold) { renderer.follow = false; renderer.cam += camHold * 900 * dt; renderer.clampCam(); }
   renderer.autoCam(battle, dt * save.speed);
   // auto quality: if frames are slow for a couple of seconds, switch to fast graphics

@@ -188,6 +188,21 @@ Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on me
 - **Trials Tower:** 40 floors, each with its own rule (fast enemies, ranged only, melee only, no miners, hyena raids, vulture skies…). A guardian boss every 5 floors; gem rewards per floor.
 - **Campaign extended to 70 levels:** Elven Forest (51–60, boss Elf Queen) and Frozen Tundra (61–70, boss Giant King).
 
+## v0.9: more realistic graphics, stronger and more legends, five game-feel upgrades
+
+- **Graphics:**
+  - Cached terrain texture per region (wind ripples, lit pebbles, dry cracks, grass tufts, snow drifts, depth darkening).
+  - Layered soft shadows cast away from the sun.
+  - God rays, drifting sand, and a warm light/cool shade colour grade.
+- **Premium legends:**
+  - Existing four deal about 35% more damage.
+  - New: Shadow Queen ($3.99: crits, dodge, life steal), Golden Guardian ($4.99: regenerating colossus with stun slam), Phoenix Rider ($5.99: flying piercing fire).
+- **Kill streaks** (Triple / Mega / Rampage / Unstoppable) with bonus gold.
+- **Boss health bar** at the top while a boss is on the field.
+- **Victory finale:** slow-motion push-in on the falling fort.
+- **Legendary entrance:** a light pillar and shockwave when a hero or legend is summoned.
+- **Fort rage:** below 30% fort health, fort archers fire twice as fast, with a red pulse.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

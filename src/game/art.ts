@@ -650,6 +650,19 @@ function drawArtInner(a: ArtCtx) {
       head: (hx, hy, r) => { c.beginPath(); c.ellipse(hx, hy - r * 0.55, r * 1.2, r * 0.75, 0, Math.PI, 0); c.closePath(); fillStroke(c, vgrad(c, '#fff6e0', hy - r * 1.3, hy)); c.save(); c.strokeStyle = '#ffd34d'; c.lineWidth = 2; c.beginPath(); c.moveTo(hx - r * 1.1, hy - r * 0.6); c.quadraticCurveTo(hx, hy - r * 1.2, hx + r * 1.1, hy - r * 0.6); c.stroke(); c.restore(); glowDot(c, hx + f * r * 0.1, hy - r * 0.95, r * 0.2, '#e0453a', '#ffd0d0'); c.save(); c.strokeStyle = '#3a2210'; c.lineWidth = r * 0.25; c.beginPath(); c.moveTo(hx + f * r * 0.1, hy + r * 0.55); c.quadraticCurveTo(hx + f * r * 0.4, hy + r * 0.75, hx + f * r * 0.75, hy + r * 0.5); c.stroke(); c.restore(); },
       weapon: (hx, hy, ang) => { scimitar(c, f, h * 0.55)(hx, hy, ang); glowDot(c, hx, hy, 3, '#ffd34d'); } });
     case 'dragon': return dragon(a);
+    case 'shadowqueen': return human(a, h, { skin: '#e8c0a0', cloth: '#2a1a3a', trim: '#c9a6ff', angry: true,
+      back: (sx, sy) => poly(c, [sx - 9, sy - 5, sx + 9, sy - 5, sx - f * 30 + Math.sin(t * 5) * 4, gy - 4, sx - f * 6, gy - 2], '#4a1f6a'),
+      head: (hx, hy, r) => { c.save(); c.strokeStyle = '#1a0f24'; c.lineWidth = r * 0.5; c.beginPath(); c.moveTo(hx, hy - r); c.quadraticCurveTo(hx - f * r * 2.2, hy - r * 0.2, hx - f * r * 1.7, hy + r * 1.9); c.stroke(); c.restore(); crownAt(c, hx, hy - r * 0.95, r * 0.5); c.fillStyle = '#1a0f24'; c.beginPath(); c.arc(hx, hy + r * 0.25, r * 0.95, 0.25, Math.PI - 0.25); c.closePath(); c.globalAlpha *= 0.85; c.fill(); c.globalAlpha /= 0.85; },
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.9; line(c, hx, hy, hx + Math.cos(b2) * h * 0.32, hy + Math.sin(b2) * h * 0.32, '#e0ccff', 2.6); glowDot(c, hx + Math.cos(b2) * h * 0.32, hy + Math.sin(b2) * h * 0.32, 3, '#b48cff'); },
+      armAng: f > 0 ? lerp(-1.4, 0.7, a.atk) : Math.PI - lerp(-1.4, 0.7, a.atk) });
+    case 'guardian': { rocks(c, x, gy, h / 84, f, a.swing, a.atk, '#c9a24a', true, '#7fe0ff'); glowDot(c, x, gy - h * 0.48, 6 + Math.sin(t * 3) * 1.5, '#7fe0ff'); return; }
+    case 'firebird': { c.save(); c.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 7; i++) { c.fillStyle = `rgba(255,${140 + i * 15},40,${0.28 - i * 0.03})`; c.beginPath(); c.arc(x - f * (24 + i * 13), gy - 18 + Math.sin(t * 8 + i) * 5, 13 - i, 0, 7); c.fill(); } c.restore();
+      bird(a, gy - 10, h, '#ffb02e', '#ff5a1f', { crest: '#fff07a', beak: '#ffe08a' });
+      const rider: ArtCtx = { ...a, gy: gy - h * 0.36, swing: 0 };
+      human(rider, 36, { skin: '#f2d2b0', cloth: '#c0392b', trim: '#ffd34d', noLegs: true, head: turban(c, '#ffd34d'), armAng: f > 0 ? -0.3 : Math.PI + 0.3, weapon: (hx, hy) => glowDot(c, hx, hy, 4 + a.atk * 3, '#ff9a3d', '#fff0b0') });
+      return; }
+
     case 'pharaoh': return human(a, h, { skin: '#c98f62', cloth: '#f4ecd8', trim: '#2a6fb5', robe: true,
       head: (hx, hy, r) => { c.beginPath(); c.arc(hx, hy, r * 1.08, Math.PI * 1.05, Math.PI * 1.95); c.lineTo(hx + r * 0.9, hy - r * 0.45); c.quadraticCurveTo(hx, hy - r * 0.75, hx - r * 0.9, hy - r * 0.45); c.closePath(); fillStroke(c, '#ffd34d');
         for (const sd of [-1, 1]) { poly(c, [hx + sd * r * 0.85, hy - r * 0.5, hx + sd * r * 1.3, hy - r * 0.2, hx + sd * r * 1.25, hy + r * 1.3, hx + sd * r * 0.8, hy + r * 1.0], '#ffd34d', 2); c.fillStyle = '#2a6fb5'; for (let i = 0; i < 4; i++) c.fillRect(hx + sd * r * 1.05 - r * 0.2, hy - r * 0.05 + i * r * 0.32, r * 0.4, r * 0.12); }

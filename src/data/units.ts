@@ -5,7 +5,7 @@ export type UnitId =
   | 'miner' | 'sword' | 'archer' | 'spear' | 'camel' | 'catapult'
   | 'healer' | 'falcon' | 'fire' | 'lion' | 'assassin' | 'giant' | 'genie' | 'hero'
   | 'cavalry' | 'crossbow' | 'drummer' | 'elephant'
-  | 'sultan' | 'dragon' | 'pharaoh' | 'valkyrie';
+  | 'sultan' | 'dragon' | 'pharaoh' | 'valkyrie' | 'shadowqueen' | 'guardian' | 'firebird';
 export type EnemyId = UnitId
   | 'bandit' | 'sandmage' | 'golem' | 'ghost' | 'boss'
   | 'hyena' | 'vulture' | 'scorpking' | 'roc' | 'worm' | 'titan' | 'djinn' | 'warlord'
@@ -74,10 +74,13 @@ export const UNITS: Record<EnemyId, UnitDef> = {
   genie:    { id: 'genie',    cost: 900, train: 14, hp: 620, dmg: 42, range: 190, speed: 55, cooldown: 2.0, unlock: 99, height: 70, flying: true, ranged: true, splash: 65 },
   hero:     { id: 'hero',     cost: 1000, train: 15, hp: 1800, dmg: 55, range: 40, speed: 62, cooldown: 1.0, unlock: 99, height: 72, splash: 34, aura: 0.15, maxCount: 1 },
   // --- Premium legends (store) ---
-  sultan:   { id: 'sultan',   cost: 950, train: 12, hp: 2600, dmg: 52, range: 44, speed: 60, cooldown: 1.0, unlock: 99, height: 80, splash: 42, aura: 0.25, regen: 12, healAura: { every: 6, pct: 0.18, radius: 190 }, hero: true, premium: true, maxCount: 1 },
-  dragon:   { id: 'dragon',   cost: 1100, train: 14, hp: 1900, dmg: 48, range: 230, speed: 70, cooldown: 1.6, unlock: 99, height: 96, flying: true, ranged: true, splash: 75, hero: true, premium: true, maxCount: 1 },
-  pharaoh:  { id: 'pharaoh',  cost: 1000, train: 13, hp: 1500, dmg: 34, range: 220, speed: 48, cooldown: 1.6, unlock: 99, height: 78, ranged: true, splash: 45, summon: { unit: 'mummy', every: 6 }, raiseDead: 'mummy', hero: true, premium: true, maxCount: 1 },
-  valkyrie: { id: 'valkyrie', cost: 1050, train: 13, hp: 1500, dmg: 38, range: 210, speed: 85, cooldown: 1.7, unlock: 99, height: 74, flying: true, ranged: true, chain: { count: 6, stun: 1.0 }, hero: true, premium: true, maxCount: 1 },
+  sultan:   { id: 'sultan',   cost: 950, train: 12, hp: 2600, dmg: 70, range: 44, speed: 60, cooldown: 1.0, unlock: 99, height: 80, splash: 42, aura: 0.25, regen: 12, healAura: { every: 6, pct: 0.18, radius: 190 }, hero: true, premium: true, maxCount: 1 },
+  dragon:   { id: 'dragon',   cost: 1100, train: 14, hp: 1900, dmg: 66, range: 230, speed: 70, cooldown: 1.6, unlock: 99, height: 96, flying: true, ranged: true, splash: 75, hero: true, premium: true, maxCount: 1 },
+  pharaoh:  { id: 'pharaoh',  cost: 1000, train: 13, hp: 1500, dmg: 48, range: 220, speed: 48, cooldown: 1.6, unlock: 99, height: 78, ranged: true, splash: 45, summon: { unit: 'mummy', every: 6 }, raiseDead: 'mummy', hero: true, premium: true, maxCount: 1 },
+  valkyrie: { id: 'valkyrie', cost: 1050, train: 13, hp: 1500, dmg: 52, range: 210, speed: 85, cooldown: 1.7, unlock: 99, height: 74, flying: true, ranged: true, chain: { count: 6, stun: 1.0 }, hero: true, premium: true, maxCount: 1 },
+  shadowqueen:{ id: 'shadowqueen', cost: 1000, train: 12, hp: 1700, dmg: 64, range: 34, speed: 115, cooldown: 0.55, unlock: 99, height: 70, crit: 0.4, dodge: 0.35, lifesteal: 0.35, hero: true, premium: true, maxCount: 1 },
+  guardian: { id: 'guardian', cost: 1150, train: 15, hp: 4800, dmg: 60, range: 54, speed: 30, cooldown: 1.6, unlock: 99, height: 120, splash: 55, regen: 20, stomp: { every: 6, radius: 190, dmg: 70, stun: 1.6 }, hero: true, premium: true, maxCount: 1 },
+  firebird: { id: 'firebird', cost: 1100, train: 14, hp: 2000, dmg: 58, range: 240, speed: 95, cooldown: 1.4, unlock: 99, height: 92, flying: true, ranged: true, splash: 70, pierce: true, regen: 10, hero: true, premium: true, maxCount: 1 },
   // --- Campaign enemies ---
   bandit:   { id: 'bandit',   cost: 0, train: 0, hp: 100, dmg: 11, range: 26,  speed: 66, cooldown: 0.8, unlock: 99, height: 55 },
   sandmage: { id: 'sandmage', cost: 0, train: 0, hp: 90,  dmg: 15, range: 200, speed: 45, cooldown: 1.8, unlock: 99, height: 58, ranged: true, splash: 28 },
@@ -159,8 +162,8 @@ export const UNITS: Record<EnemyId, UnitDef> = {
 };
 
 /** Order of the unit bar. */
-export const PLAYER_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'cavalry', 'crossbow', 'catapult', 'healer', 'drummer', 'falcon', 'fire', 'lion', 'assassin', 'giant', 'elephant', 'genie', 'hero', 'sultan', 'dragon', 'pharaoh', 'valkyrie'];
-export const PREMIUM_UNITS: UnitId[] = ['sultan', 'dragon', 'pharaoh', 'valkyrie'];
+export const PLAYER_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'cavalry', 'crossbow', 'catapult', 'healer', 'drummer', 'falcon', 'fire', 'lion', 'assassin', 'giant', 'elephant', 'genie', 'hero', 'sultan', 'dragon', 'pharaoh', 'valkyrie', 'shadowqueen', 'guardian', 'firebird'];
+export const PREMIUM_UNITS: UnitId[] = ['sultan', 'dragon', 'pharaoh', 'valkyrie', 'shadowqueen', 'guardian', 'firebird'];
 export const BASE_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'cavalry', 'crossbow', 'catapult'];
 
 export const MINER_GOLD = 5;

@@ -71,16 +71,20 @@ export class Renderer {
     const shx = b.shake > 0 ? (Math.random() - 0.5) * b.shake * 14 : 0;
     const shy = b.shake > 0 ? (Math.random() - 0.5) * b.shake * 8 : 0;
     c.setTransform(this.scale, 0, 0, this.scale, shx * this.scale, shy * this.scale);
+    if (b.over && b.finale > 0) { // victory slow-motion: gentle push-in on the fallen fort
+      const z = 1 + 0.18 * Math.min(1, (1.6 - b.finale) / 0.8);
+      const fx = b.finaleX - this.cam, fy = GROUND - 100;
+      c.translate(fx, fy); c.scale(z, z); c.translate(-fx, -fy);
+    }
 
     this.drawBackdrop(b.level.region, th, time);
 
     c.save();
     c.translate(-this.cam, 0);
     // ground with soft gradient, pebbles and tufts
-    const gg = c.createLinearGradient(0, GROUND - 24, 0, H);
-    gg.addColorStop(0, th.ground[0]); gg.addColorStop(1, th.ground[1]);
-    c.fillStyle = gg;
-    c.fillRect(-50, GROUND - 24, W + 100, H - GROUND + 40);
+    // pre-rendered terrain texture (ripples, pebbles, cracks, tufts) cached per region
+    const tex = this.groundTexture(b.level.region, th);
+    c.drawImage(tex, -50, GROUND - 24);
     c.fillStyle = 'rgba(0,0,0,.08)'; c.fillRect(-50, GROUND - 24, W + 100, 4);
     for (let x = 0; x < W; x += 47) {
       const k = (x * 7919) % 97;
@@ -108,6 +112,11 @@ export class Renderer {
     // melee slash arcs and hit sparks
     for (const e of b.fx) {
       const k = e.life / e.max;
+      if (e.kind === 'pillar') {
+        const g = c.createLinearGradient(e.x - 30, 0, e.x + 30, 0); g.addColorStop(0, 'rgba(255,230,120,0)'); g.addColorStop(0.5, `rgba(255,240,170,${0.8 * k})`); g.addColorStop(1, 'rgba(255,230,120,0)');
+        c.fillStyle = g; c.fillRect(e.x - 30, 0, 60, GROUND); continue;
+      }
+      if (e.kind === 'ring') { c.strokeStyle = `rgba(255,230,140,${k})`; c.lineWidth = 4 * k + 1; c.beginPath(); c.ellipse(e.x, e.y, (1 - k) * 200 + 10, ((1 - k) * 200 + 10) * 0.22, 0, 0, 7); c.stroke(); continue; }
       if (e.kind === 'slash') {
         c.strokeStyle = `rgba(255,255,255,${0.85 * k})`; c.lineWidth = 3 + 3 * k; c.lineCap = 'round';
         c.beginPath(); c.arc(e.x, e.y, 16, e.f > 0 ? -1.3 : Math.PI - 0.6, e.f > 0 ? 0.6 : Math.PI + 1.3); c.stroke();
@@ -150,6 +159,23 @@ export class Renderer {
     c.globalAlpha = 1;
     c.restore();
 
+    if (!low && !th.night) { // god rays from the sun
+      const sx = this.viewW * 0.8, sy = 80;
+      c.save(); c.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI * 0.55 + i * 0.13 + Math.sin(time * 0.2 + i) * 0.02;
+        const g = c.createLinearGradient(sx, sy, sx + Math.cos(a) * 520, sy + Math.sin(a) * 520);
+        g.addColorStop(0, 'rgba(255,240,200,.10)'); g.addColorStop(1, 'rgba(255,240,200,0)');
+        c.fillStyle = g; c.beginPath(); c.moveTo(sx, sy); c.lineTo(sx + Math.cos(a - 0.04) * 560, sy + Math.sin(a - 0.04) * 560); c.lineTo(sx + Math.cos(a + 0.04) * 560, sy + Math.sin(a + 0.04) * 560); c.closePath(); c.fill();
+      }
+      c.restore();
+    }
+    if (!low && (b.level.region === 'dunes' || b.level.region === 'oasis' || b.level.region === 'tombs')) { // drifting sand near the ground
+      c.fillStyle = 'rgba(240,210,160,.35)';
+      for (let i = 0; i < 26; i++) { const x = ((i * 173 + time * (60 + (i % 5) * 18)) % (this.viewW + 60)) - 30, y = GROUND - 30 + ((i * 37) % 60) + Math.sin(time * 2 + i) * 4; c.fillRect(x, y, 2 + (i % 3), 1.2); }
+    }
+    // warm colour grade: light from the right, cooler shade on the left
+    if (!low) { const lg = c.createLinearGradient(0, 0, this.viewW, 0); lg.addColorStop(0, th.night ? 'rgba(20,20,60,.10)' : 'rgba(40,30,80,.07)'); lg.addColorStop(1, th.night ? 'rgba(0,0,0,0)' : 'rgba(255,190,90,.07)'); c.fillStyle = lg; c.fillRect(0, 0, this.viewW, H); }
     // atmosphere: haze, storm, night tint, ability flash, vignette
     if (!low) {
     const hz = c.createLinearGradient(0, GROUND - 160, 0, GROUND);
@@ -166,6 +192,7 @@ export class Renderer {
     if (th.night) { c.fillStyle = 'rgba(20,16,50,.16)'; c.fillRect(0, 0, this.viewW, H); }
     if (b.abilityFx > 0) { c.fillStyle = `rgba(255,220,120,${b.abilityFx * 0.15})`; c.fillRect(0, 0, this.viewW, H); }
     if (b.buff > 0) { c.fillStyle = `rgba(255,120,40,${0.05 + Math.sin(time * 8) * 0.02})`; c.fillRect(0, 0, this.viewW, H); }
+    if (b.rage && !b.over) { const pr = 0.12 + Math.sin(time * 6) * 0.05; const rg = c.createRadialGradient(this.viewW / 2, H / 2, H * 0.35, this.viewW / 2, H / 2, this.viewW * 0.7); rg.addColorStop(0, 'rgba(200,0,0,0)'); rg.addColorStop(1, `rgba(200,20,10,${pr})`); c.fillStyle = rg; c.fillRect(0, 0, this.viewW, H); }
     if (low) return;
     const vg = c.createRadialGradient(this.viewW / 2, H * 0.55, H * 0.45, this.viewW / 2, H * 0.55, Math.max(this.viewW, H) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(20,10,0,.28)');
@@ -379,6 +406,49 @@ export class Renderer {
     c.fillStyle = team; c.beginPath(); c.moveTo(tx0 + tw / 2, tTop - 82); c.quadraticCurveTo(tx0 + tw / 2 + f * 22, tTop - 80 + wv, tx0 + tw / 2 + f * 44, tTop - 72 + wv); c.lineTo(tx0 + tw / 2, tTop - 58); c.closePath(); c.fill();
   }
 
+  private texCache = new Map<string, HTMLCanvasElement>();
+  private groundTexture(region: RegionId, th: Theme) {
+    const key = region + (isLowQuality() ? 'L' : 'H');
+    let cv = this.texCache.get(key);
+    if (cv) return cv;
+    cv = document.createElement('canvas');
+    cv.width = W + 100; cv.height = H - GROUND + 40;
+    const c = cv.getContext('2d')!;
+    const h = cv.height;
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, th.ground[0]); g.addColorStop(1, th.ground[1]);
+    c.fillStyle = g; c.fillRect(0, 0, cv.width, h);
+    // a darker strip where the battlefield meets the horizon, a lit lip at the top
+    c.fillStyle = 'rgba(0,0,0,.10)'; c.fillRect(0, 0, cv.width, 5);
+    c.fillStyle = 'rgba(255,245,220,.18)'; c.fillRect(0, 5, cv.width, 2);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const snow = region === 'tundra', grassy = !!th.grass, dark = region === 'graveyard' || region === 'shadow';
+    // wind ripples
+    c.lineWidth = 1.5;
+    for (let i = 0; i < 260; i++) {
+      const x = rnd() * cv.width, y = 14 + rnd() * (h - 20), len = 18 + rnd() * 50;
+      c.strokeStyle = snow ? 'rgba(255,255,255,.45)' : `rgba(${dark ? '20,20,30' : '120,80,40'},${0.08 + rnd() * 0.1})`;
+      c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + len / 2, y - 3 - rnd() * 3, x + len, y); c.stroke();
+      c.strokeStyle = 'rgba(255,245,220,.12)'; c.beginPath(); c.moveTo(x, y + 2); c.quadraticCurveTo(x + len / 2, y - 1, x + len, y + 2); c.stroke();
+    }
+    // pebbles with a lit top and a shadow
+    for (let i = 0; i < 160; i++) {
+      const x = rnd() * cv.width, y = 10 + rnd() * (h - 14), r = 1.5 + rnd() * 3.5;
+      c.fillStyle = 'rgba(40,25,10,.25)'; c.beginPath(); c.ellipse(x + 1, y + 1.5, r, r * 0.6, 0, 0, 7); c.fill();
+      c.fillStyle = snow ? '#dfe8ee' : dark ? '#6a6878' : `rgb(${150 + rnd() * 50},${120 + rnd() * 40},${80 + rnd() * 30})`; c.beginPath(); c.ellipse(x, y, r, r * 0.65, 0, 0, 7); c.fill();
+      c.fillStyle = 'rgba(255,255,240,.35)'; c.beginPath(); c.ellipse(x - r * 0.3, y - r * 0.25, r * 0.4, r * 0.25, 0, 0, 7); c.fill();
+    }
+    // dry cracks
+    if (!snow && !grassy) { c.strokeStyle = 'rgba(70,40,15,.22)'; c.lineWidth = 1; for (let i = 0; i < 30; i++) { let x = rnd() * cv.width, y = 20 + rnd() * (h - 30); c.beginPath(); c.moveTo(x, y); for (let k = 0; k < 4; k++) { x += 6 + rnd() * 10; y += (rnd() - 0.5) * 8; c.lineTo(x, y); } c.stroke(); } }
+    // grass tufts or snow drifts
+    if (grassy && !isLowQuality()) for (let i = 0; i < 220; i++) { const x = rnd() * cv.width, y = 6 + rnd() * 30; c.strokeStyle = rnd() > 0.5 ? th.grass! : shadeHex(th.grass!, 0.2); c.lineWidth = 1.6; for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(x, y); c.lineTo(x + k * 4 + (rnd() - 0.5) * 2, y - 6 - rnd() * 6); c.stroke(); } }
+    if (snow) for (let i = 0; i < 40; i++) { const x = rnd() * cv.width, y = 8 + rnd() * (h - 12); c.fillStyle = 'rgba(255,255,255,.7)'; c.beginPath(); c.ellipse(x, y, 20 + rnd() * 40, 4 + rnd() * 4, 0, 0, 7); c.fill(); }
+    // depth: the near ground darkens slightly toward the viewer
+    const dg = c.createLinearGradient(0, h * 0.4, 0, h); dg.addColorStop(0, 'rgba(0,0,0,0)'); dg.addColorStop(1, 'rgba(30,15,5,.22)'); c.fillStyle = dg; c.fillRect(0, 0, cv.width, h);
+    this.texCache.set(key, cv);
+    return cv;
+  }
+
   private tombProps() {
     const c = this.ctx;
     for (let x = 520; x < W - 500; x += 330) {
@@ -587,9 +657,11 @@ export class Renderer {
     const groundY = GROUND + u.lane;
     c.save();
     // soft ground shadow (flying units too, so you can read their position)
-    c.fillStyle = 'rgba(60,35,10,.22)';
     const sw = Math.min(70, u.def.height * 0.45) * (u.def.flying ? 0.7 : 1);
-    c.beginPath(); c.ellipse(u.x, groundY + 2, sw, sw * 0.18, 0, 0, 7); c.fill();
+    // layered soft shadow cast slightly away from the sun (sun is top-right)
+    c.fillStyle = 'rgba(50,28,8,.10)'; c.beginPath(); c.ellipse(u.x - sw * 0.25, groundY + 3, sw * 1.35, sw * 0.26, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(50,28,8,.18)'; c.beginPath(); c.ellipse(u.x - sw * 0.12, groundY + 2, sw, sw * 0.18, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(30,15,4,.22)'; c.beginPath(); c.ellipse(u.x, groundY + 1, sw * 0.55, sw * 0.1, 0, 0, 7); c.fill();
     // team ring at the feet (sides stay readable even in mirror matches)
     if (!u.dead) { c.strokeStyle = TEAM[u.side]; c.globalAlpha = 0.55; c.lineWidth = 2; c.beginPath(); c.ellipse(u.x, groundY + 2, Math.min(26, sw * 0.8), Math.min(6, sw * 0.16), 0, 0, 7); c.stroke(); c.globalAlpha = 1; }
     if (u === b.controlled) {

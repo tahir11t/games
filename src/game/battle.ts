@@ -86,6 +86,8 @@ export interface BattleEvents {
   onWave?(n: number): void;
   onRank?(u: Unit): void;
   onRush?(): void;
+  onStreak?(n: number, bonus: number): void;
+  onRage?(): void;
 }
 
 export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId; extra?: EnemyId[] };
@@ -144,7 +146,12 @@ export class Battle {
   rush = 0; // gold rush timer (both mines yield double)
   private rushNext = 70 + Math.random() * 40;
   holdX = W / 2 - 80; // rally flag for "hold"
-  fx: { kind: 'slash' | 'spark'; x: number; y: number; f: number; life: number; max: number }[] = [];
+  fx: { kind: 'slash' | 'spark' | 'pillar' | 'ring'; x: number; y: number; f: number; life: number; max: number }[] = [];
+  streak = 0;
+  private streakT = 0;
+  rage = false;
+  finale = 0; // victory slow-motion timer
+  finaleX = 0;
   stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0, bossKills: 0 };
   private survivalNext = 8;
   private passiveIncome = 0;
@@ -345,6 +352,9 @@ export class Battle {
     this.debuff = Math.max(0, this.debuff - dt);
     this.shake = Math.max(0, this.shake - dt * 2);
     this.rush = Math.max(0, this.rush - dt);
+    this.streakT -= dt;
+    if (this.streakT <= 0) this.streak = 0;
+    if (!this.rage && this.castleHp[0] > 0 && this.castleHp[0] / this.castleMax[0] < 0.3) { this.rage = true; this.ev.onRage?.(); }
     this.rushNext -= dt;
     if (this.rushNext <= 0) { this.rush = 12; this.rushNext = 80 + Math.random() * 50; this.ev.onRush?.(); }
     for (const e of this.fx) e.life -= dt;
@@ -440,7 +450,12 @@ export class Battle {
     if (q[0].left > 0) return;
     const item = q.shift()!;
     if (side === 0) {
-      this.spawn(item.id, 0);
+      const nu = this.spawn(item.id, 0);
+      if (nu.def.hero || nu.def.premium) { // legendary entrance: light pillar + shockwave
+        this.fx.push({ kind: 'pillar', x: nu.x, y: GROUND, f: 1, life: 1, max: 1 }, { kind: 'ring', x: nu.x, y: GROUND, f: 1, life: 0.7, max: 0.7 });
+        this.shake = Math.min(0.6, this.shake + 0.3); sfx('rank');
+        for (const v of this.units) if (v.side === 1 && !v.dead && !v.def.boss && Math.abs(v.x - nu.x) < 160) v.x += 30;
+      }
       const id = (this.roles[item.id] ?? item.id) as UnitId;
       this.producedCounts[id] = (this.producedCounts[id] ?? 0) + 1;
       this.stats.trained++;
@@ -452,6 +467,7 @@ export class Battle {
 
   private finish(win: boolean) {
     this.over = true;
+    this.finale = 1.6; this.finaleX = CASTLE_X[win ? 1 : 0];
     this.shake = 1;
     sfx('collapse');
     const cx = CASTLE_X[win ? 1 : 0];
@@ -848,7 +864,7 @@ export class Battle {
       const range = TOWER_RANGE[side];
       const foes = this.units.filter((o) => o.side !== side && !o.dead && !o.hidden && Math.abs(o.x - fx) < range).sort((a, z) => Math.abs(a.x - fx) - Math.abs(z.x - fx));
       if (!foes.length) { this.towerCd[side] = 0.25; continue; }
-      this.towerCd[side] = side === 0 ? 1.0 : 1.4;
+      this.towerCd[side] = side === 0 ? (this.rage ? 0.45 : 1.0) : 1.4;
       this.towerShot[side] = 0.3;
       // Each fort archer looses an arrow, spreading over the closest targets.
       for (let k = 0; k < n; k++) {
@@ -904,7 +920,7 @@ export class Battle {
 
   private projKind(u: Unit): Projectile['kind'] {
     const id = u.def.id;
-    return id === 'catapult' ? 'rock' : id === 'fire' || id === 'dragon' ? 'fire' : id === 'crossbow' ? 'bolt' : ['sandmage', 'boss', 'djinn', 'genie', 'phoenix', 'banshee', 'necromancer', 'lich', 'thunderlord', 'elfqueen', 'poltergeist', 'pharaoh', 'valkyrie'].includes(id) ? (id === 'phoenix' ? 'fire' : 'magic') : 'arrow';
+    return id === 'catapult' ? 'rock' : id === 'fire' || id === 'dragon' || id === 'firebird' ? 'fire' : id === 'crossbow' ? 'bolt' : ['sandmage', 'boss', 'djinn', 'genie', 'phoenix', 'banshee', 'necromancer', 'lich', 'thunderlord', 'elfqueen', 'poltergeist', 'pharaoh', 'valkyrie'].includes(id) ? (id === 'phoenix' ? 'fire' : 'magic') : 'arrow';
   }
 
   /** Guided arc: the shot keeps tracking the target, so moving units are hit. */
@@ -1019,6 +1035,9 @@ export class Battle {
       o.dead = 0.001;
       if (o.side === 1) {
         this.stats.kills++;
+        this.streak = this.streakT > 0 ? this.streak + 1 : 1;
+        this.streakT = 2.8;
+        if ([3, 5, 8, 12].includes(this.streak)) { const bonus = this.streak * 15; this.gold += bonus; this.ev.onStreak?.(this.streak, bonus); }
         if (o.def.miner) this.stats.enemyMinersKilled++;
         if (o.def.boss) this.stats.bossKills++;
         const bounty = Math.round((o.def.boss ? 200 : 8 + o.def.hp / 25) * (this.level.mods?.goldMult ?? 1));
@@ -1069,6 +1088,17 @@ export class Battle {
     const nt: FloatText = { x: o.x + (Math.random() - 0.5) * 14, y: this.unitY(o) - o.def.height - 22, text: `-${Math.round(amount)}`, life: 0.9, color: o.side === 0 ? '#ff6b5a' : '#ffffff', size: small ? 13 : 15, value: amount };
     o.dmgText = nt;
     this.texts.push(nt);
+  }
+
+  /** Keeps effects animating in slow motion after the fort falls. */
+  finaleTick(dt: number) {
+    if (this.finale <= 0) return;
+    this.finale -= dt;
+    const s = dt * 0.3;
+    for (const p of this.particles) { p.x += p.vx * s; p.y += p.vy * s; p.vy += 300 * s; p.life -= s; }
+    this.particles = this.particles.filter((p) => p.life > 0);
+    for (const u of this.units) if (u.dead) u.dead += s;
+    if (Math.random() < 0.5) this.dust(this.finaleX + (Math.random() - 0.5) * 160, GROUND - Math.random() * 160, '#b9925a', 5 + Math.random() * 7);
   }
 
   dust(x: number, y: number, color: string, size: number) {
