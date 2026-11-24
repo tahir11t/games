@@ -5,14 +5,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { FACTIONS, CONQUEST_BATTLES, conquestLevel, FACTION_TUNE, type FactionDef } from '../src/data/factions';
 import { play, expectedUpgrade } from './balance';
 
-const N = 8;
+const N = Number(process.env.N ?? 4);
 function rate(f: FactionDef, tune: number) {
   const prev = FACTION_TUNE[f.id];
   FACTION_TUNE[f.id] = tune;
   let w = 0, n = 0;
   for (let k = 1; k <= CONQUEST_BATTLES; k++) {
     const L = conquestLevel(f, k);
-    const idx = Math.min(50, f.base + (k - 1) * 3);
+    const idx = Math.min(50, Math.round(f.base + (k - 1) * 1.6));
     for (let i = 0; i < N; i++) { if (play(idx, expectedUpgrade(idx), 1, L).win) w++; n++; }
   }
   FACTION_TUNE[f.id] = prev;
@@ -32,7 +32,7 @@ if (process.argv.includes('--tune')) {
   for (const f of FACTIONS) {
     const row: string[] = [];
     for (let k = 1; k <= CONQUEST_BATTLES; k++) {
-      const L = conquestLevel(f, k); const idx = Math.min(50, f.base + (k - 1) * 3);
+      const L = conquestLevel(f, k); const idx = Math.min(50, Math.round(f.base + (k - 1) * 1.6));
       let w = 0; for (let i = 0; i < N; i++) if (play(idx, expectedUpgrade(idx), 1, L).win) w++;
       row.push(`${k}:${Math.round((w / N) * 100)}%`);
     }

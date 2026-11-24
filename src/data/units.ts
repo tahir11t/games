@@ -14,7 +14,8 @@ export type EnemyId = UnitId
   | 'wisp' | 'wraith' | 'banshee' | 'specter' | 'phantom' | 'ghostking'
   | 'gravedigger' | 'zombie' | 'runner' | 'bloater' | 'skelarcher' | 'abomination' | 'necromancer' | 'plaguelord'
   | 'dwarfminer' | 'axethrower' | 'shieldwall' | 'berserker' | 'cannon' | 'gyrocopter' | 'dwarfking'
-  | 'goblin' | 'goblinspear' | 'ogre' | 'troll' | 'cyclops' | 'frostgiant' | 'giantking';
+  | 'goblin' | 'goblinspear' | 'ogre' | 'troll' | 'cyclops' | 'frostgiant' | 'giantking'
+  | 'sprite' | 'moonarcher' | 'poltergeist' | 'soulreaper' | 'ghoul' | 'lich' | 'runepriest' | 'thunderlord' | 'mammoth' | 'colossus';
 
 export interface UnitDef {
   id: EnemyId;
@@ -41,6 +42,12 @@ export interface UnitDef {
   regen?: number; // hp per second
   explode?: { dmg: number; radius: number }; // bursts on death
   summon?: { unit: EnemyId; every: number }; // raises allies over time
+  pierce?: boolean; // shots hit every foe along their path
+  lifesteal?: number; // share of damage dealt returned as health
+  raiseDead?: EnemyId; // fallen foes nearby rise as this unit on our side
+  chain?: { count: number; stun: number }; // lightning jumps between foes
+  stomp?: { every: number; radius: number; dmg: number; stun: number }; // ground slam
+  hero?: boolean; // special character with a unique power
   maxCount?: number; // max alive at once
   boss?: boolean;
   height: number;
@@ -129,6 +136,17 @@ export const UNITS: Record<EnemyId, UnitDef> = {
   cyclops:    { id: 'cyclops',    cost: 0, train: 0, hp: 820, dmg: 45, range: 260, speed: 30, cooldown: 3.0, unlock: 99, height: 108, ranged: true, splash: 45 },
   frostgiant: { id: 'frostgiant', cost: 0, train: 0, hp: 1650, dmg: 50, range: 50, speed: 24, cooldown: 1.8, unlock: 99, height: 130, splash: 50 },
   giantking:  { id: 'giantking',  cost: 0, train: 0, hp: 5200, dmg: 60, range: 60, speed: 24, cooldown: 1.8, unlock: 99, height: 150, splash: 60, regen: 8, boss: true },
+  // --- Civilization specials & heroes ---
+  sprite:     { id: 'sprite',     cost: 0, train: 0, hp: 70,  dmg: 11, range: 170, speed: 90, cooldown: 1.1, unlock: 99, height: 34, flying: true, ranged: true },
+  moonarcher: { id: 'moonarcher', cost: 0, train: 0, hp: 650, dmg: 34, range: 320, speed: 60, cooldown: 1.6, unlock: 99, height: 66, ranged: true, pierce: true, hero: true, maxCount: 1 },
+  poltergeist:{ id: 'poltergeist',cost: 0, train: 0, hp: 120, dmg: 18, range: 200, speed: 55, cooldown: 1.9, unlock: 99, height: 50, ranged: true, splash: 45, flying: true },
+  soulreaper: { id: 'soulreaper', cost: 0, train: 0, hp: 900, dmg: 40, range: 44, speed: 70, cooldown: 1.0, unlock: 99, height: 76, splash: 40, lifesteal: 0.5, flying: true, hero: true, maxCount: 1 },
+  ghoul:      { id: 'ghoul',      cost: 0, train: 0, hp: 260, dmg: 18, range: 28, speed: 85, cooldown: 0.7, unlock: 99, height: 56, lifesteal: 0.25 },
+  lich:       { id: 'lich',       cost: 0, train: 0, hp: 700, dmg: 30, range: 220, speed: 44, cooldown: 1.8, unlock: 99, height: 72, ranged: true, splash: 45, raiseDead: 'zombie', hero: true, maxCount: 1 },
+  runepriest: { id: 'runepriest', cost: 0, train: 0, hp: 160, dmg: 0,  range: 150, speed: 42, cooldown: 1.3, unlock: 99, height: 46, heal: 20 },
+  thunderlord:{ id: 'thunderlord',cost: 0, train: 0, hp: 1100, dmg: 32, range: 200, speed: 46, cooldown: 2.0, unlock: 99, height: 62, ranged: true, chain: { count: 5, stun: 0.9 }, hero: true, maxCount: 1 },
+  mammoth:    { id: 'mammoth',    cost: 0, train: 0, hp: 1500, dmg: 36, range: 46, speed: 40, cooldown: 1.6, unlock: 99, height: 110, splash: 46, charge: true },
+  colossus:   { id: 'colossus',   cost: 0, train: 0, hp: 2600, dmg: 52, range: 54, speed: 28, cooldown: 1.7, unlock: 99, height: 140, splash: 50, stomp: { every: 7, radius: 170, dmg: 45, stun: 1.4 }, hero: true, maxCount: 1 },
   warlord:  { id: 'warlord',  cost: 0, train: 0, hp: 6500, dmg: 60, range: 55, speed: 34, cooldown: 1.3, unlock: 99, height: 120, splash: 45, aura: 0.2, boss: true },
 };
 

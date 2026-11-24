@@ -1,7 +1,7 @@
 import { Battle, W, H, GROUND, CASTLE_X, MINE_X, type Unit } from './battle';
 import type { RegionId } from '../data/levels';
 import { drawArt, glowDot, isLowQuality, shade as shadeHex } from './art';
-import { UNITS } from '../data/units';
+import { UNITS, type EnemyId } from '../data/units';
 
 const INK = '#16120e';
 let TEAM = ['#e0a82e', '#9e1f1f'];
@@ -120,6 +120,11 @@ export class Renderer {
       else if (p.kind === 'meteor') { glowDot(c, 0, 0, 16, '#ff9a3d', '#ffe0a0'); c.fillStyle = '#5a3a22'; c.beginPath(); c.arc(4, 0, 10, 0, 7); c.fill(); c.fillStyle = 'rgba(255,160,60,.5)'; c.beginPath(); c.moveTo(-10, -12); c.lineTo(-60, 0); c.lineTo(-10, 12); c.fill(); }
       else glowDot(c, 0, 0, 6, '#c77dff', '#f3e0ff');
       c.restore();
+    }
+    for (const bo of b.bolts) { // chain lightning
+      c.strokeStyle = `rgba(190,230,255,${Math.min(1, bo.life * 5)})`; c.lineWidth = 3; c.beginPath(); c.moveTo(bo.x1, bo.y1);
+      for (let k = 1; k < 6; k++) { const t2 = k / 6; c.lineTo(bo.x1 + (bo.x2 - bo.x1) * t2 + (Math.random() - 0.5) * 14, bo.y1 + (bo.y2 - bo.y1) * t2 + (Math.random() - 0.5) * 14); }
+      c.lineTo(bo.x2, bo.y2); c.stroke(); c.strokeStyle = '#fff'; c.lineWidth = 1; c.stroke();
     }
     for (const p of b.particles) { c.globalAlpha = Math.max(0, p.life) * 0.9; c.fillStyle = p.color; c.beginPath(); c.arc(p.x, p.y, p.size / 2, 0, 7); c.fill(); }
     c.globalAlpha = 1;
@@ -288,6 +293,75 @@ export class Renderer {
     }
   }
 
+  /** Civilization forts: same footprint (archer posts, gate) but a style of their own. */
+  private factionFort(style: string, side: 0 | 1, f: number, G: number, wTop: number, tx0: number, tw: number, tTop: number, time: number, low: boolean) {
+    const c = this.ctx;
+    const team = TEAM[side];
+    const stroke = (lw = 2.5, col = 'rgba(20,12,6,.8)') => { c.strokeStyle = col; c.lineWidth = lw; c.stroke(); };
+    const grad = (a: string, b2: string, y0: number, y1: number) => { if (low) return a; const g = c.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, a); g.addColorStop(1, b2); return g; };
+    if (style === 'elves') {
+      // a giant living tree with wooden platforms
+      c.fillStyle = grad('#8a5f36', '#5a3a1e', tTop, G); c.beginPath();
+      c.moveTo(-f * 140, G); c.quadraticCurveTo(-f * 120, G - 60, tx0 + tw * 0.2, G - 120); c.lineTo(tx0 + tw * 0.25, tTop + 10); c.lineTo(tx0 + tw * 0.8, tTop + 10); c.quadraticCurveTo(tx0 + tw * 0.9, G - 100, f * 30, G - 60); c.quadraticCurveTo(f * 90, G - 20, f * 110, G); c.closePath(); c.fill(); stroke();
+      c.strokeStyle = 'rgba(40,20,5,.4)'; c.lineWidth = 2; for (let k = 0; k < 5; k++) { c.beginPath(); c.moveTo(tx0 + 14 + k * 12, tTop + 30); c.quadraticCurveTo(tx0 + 10 + k * 14, G - 90, tx0 - f * 20 + k * 16, G - 10); c.stroke(); }
+      for (const [dx, dy, r] of [[0, -40, 70], [-60, -10, 50], [60, -10, 50], [-20, -80, 46], [40, -70, 44]] as [number, number, number][]) {
+        c.fillStyle = low ? '#3f8f3a' : (() => { const g = c.createRadialGradient(tx0 + tw / 2 + dx - 15, tTop + dy - 15, 5, tx0 + tw / 2 + dx, tTop + dy, r); g.addColorStop(0, '#6fc25a'); g.addColorStop(1, '#2f7a32'); return g; })();
+        c.beginPath(); c.arc(tx0 + tw / 2 + dx, tTop + dy + Math.sin(time + dx) * 2, r, 0, 7); c.fill(); stroke(2, 'rgba(20,50,20,.6)');
+      }
+      for (const [y, w] of [[wTop, 200], [tTop - 6, tw + 30]] as [number, number][]) { const x0 = y === wTop ? -100 : tx0 - 15; c.fillStyle = '#9a6a3a'; c.fillRect(x0, y - 4, w, 10); c.strokeStyle = 'rgba(40,20,5,.7)'; c.lineWidth = 2; c.strokeRect(x0, y - 4, w, 10); for (let k = x0 + 6; k < x0 + w; k += 18) { c.beginPath(); c.moveTo(k, y + 6); c.lineTo(k - 6, y + 34); c.stroke(); } }
+      c.fillStyle = '#2a1a0c'; c.beginPath(); c.ellipse(f * 18, G - 30, 26, 32, 0, Math.PI, 0); c.lineTo(f * 18 + 26, G); c.lineTo(f * 18 - 26, G); c.closePath(); c.fill();
+      c.fillStyle = 'rgba(255,240,160,.5)'; for (let k = 0; k < 6; k++) { c.beginPath(); c.arc(-80 + k * 32 + Math.sin(time * 2 + k) * 6, wTop - 30 + Math.cos(time * 1.7 + k) * 10, 2.5, 0, 7); c.fill(); }
+    } else if (style === 'ghosts') {
+      // dark gothic keep with spires and violet light
+      c.fillStyle = grad('#3a3450', '#221e30', wTop, G); c.fillRect(-100, wTop, 200, G - wTop); c.strokeStyle = 'rgba(0,0,0,.8)'; c.lineWidth = 2.5; c.strokeRect(-100, wTop, 200, G - wTop);
+      c.fillStyle = grad('#423a5c', '#221e30', tTop, G); c.fillRect(tx0, tTop, tw, G - tTop); c.strokeRect(tx0, tTop, tw, G - tTop);
+      for (const [x0, w, y] of [[tx0 - 6, tw + 12, tTop], [-100, 40, wTop], [60, 40, wTop]] as [number, number, number][]) { c.fillStyle = '#2a2440'; c.beginPath(); c.moveTo(x0, y); c.lineTo(x0 + w / 2, y - (w > 50 ? 90 : 50)); c.lineTo(x0 + w, y); c.closePath(); c.fill(); stroke(); }
+      c.fillStyle = 'rgba(180,140,255,.9)'; for (const [wx, wy] of [[tx0 + tw / 2, tTop + 50], [tx0 + tw / 2, tTop + 120], [-60, wTop + 40], [50, wTop + 40]]) { c.beginPath(); c.moveTo(wx - 6, wy + 16); c.lineTo(wx - 6, wy); c.lineTo(wx, wy - 8); c.lineTo(wx + 6, wy); c.lineTo(wx + 6, wy + 16); c.closePath(); c.fill(); }
+      c.fillStyle = '#120e1c'; c.beginPath(); c.moveTo(f * 18 - 26, G); c.lineTo(f * 18 - 26, G - 50); c.lineTo(f * 18, G - 84); c.lineTo(f * 18 + 26, G - 50); c.lineTo(f * 18 + 26, G); c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(120,90,200,.6)'; c.lineWidth = 2; for (let k = -18; k <= 18; k += 9) { c.beginPath(); c.moveTo(f * 18 + k, G); c.lineTo(f * 18 + k, G - 60); c.stroke(); }
+      if (!low) for (let k = 0; k < 3; k++) { const wx = Math.sin(time * 0.8 + k * 2) * 80, wy = wTop - 40 - k * 30 + Math.cos(time + k) * 8; c.fillStyle = 'rgba(200,220,255,.35)'; c.beginPath(); c.arc(wx, wy, 9, 0, 7); c.fill(); }
+    } else if (style === 'zombies') {
+      // rotting palisade with skulls and a green cauldron
+      for (let k = -100; k < 100; k += 16) { const hgt = 120 + ((k * 13) % 30); c.fillStyle = k % 32 ? '#5a4a34' : '#4a3c2a'; c.beginPath(); c.moveTo(k, G); c.lineTo(k, G - hgt); c.lineTo(k + 8, G - hgt - 14); c.lineTo(k + 16, G - hgt); c.lineTo(k + 16, G); c.closePath(); c.fill(); stroke(1.5); }
+      for (let k = tx0; k < tx0 + tw; k += 15) { const hgt = 220 + ((k * 7) % 20); c.fillStyle = '#4a3c2a'; c.beginPath(); c.moveTo(k, G); c.lineTo(k, G - hgt); c.lineTo(k + 7, G - hgt - 14); c.lineTo(k + 15, G - hgt); c.lineTo(k + 15, G); c.closePath(); c.fill(); stroke(1.5); }
+      c.fillStyle = '#5a4a34'; c.fillRect(tx0 - 8, tTop - 6, tw + 16, 10); c.fillRect(-104, wTop - 4, 208, 9);
+      c.strokeStyle = '#3a2a1a'; c.lineWidth = 4; c.beginPath(); c.moveTo(-100, G - 40); c.lineTo(100, G - 50); c.moveTo(-100, G - 90); c.lineTo(100, G - 84); c.stroke();
+      for (const [sx, sy] of [[-70, G - 60], [-20, G - 108], [40, G - 66], [80, G - 112]]) { c.fillStyle = '#ece6d6'; c.beginPath(); c.arc(sx, sy, 8, 0, 7); c.fill(); c.fillStyle = '#1b1b1b'; c.fillRect(sx - 4, sy - 2, 3, 3); c.fillRect(sx + 1, sy - 2, 3, 3); }
+      c.fillStyle = '#1a140c'; c.fillRect(f * 18 - 24, G - 70, 48, 70);
+      c.fillStyle = '#2a2a2a'; c.beginPath(); c.ellipse(f * 70, G - 12, 22, 14, 0, 0, 7); c.fill();
+      c.fillStyle = '#7dff5c'; c.beginPath(); c.ellipse(f * 70, G - 22, 18, 5, 0, 0, 7); c.fill();
+      if (!low) for (let k = 0; k < 3; k++) { c.fillStyle = 'rgba(125,255,92,.35)'; c.beginPath(); c.arc(f * 70 + Math.sin(time * 2 + k) * 6, G - 30 - ((time * 20 + k * 15) % 45), 5, 0, 7); c.fill(); }
+    } else if (style === 'dwarves') {
+      // stone hall carved into the mountain, iron gate, chimney smoke
+      c.fillStyle = grad('#8a8478', '#5e5a52', tTop - 60, G); c.beginPath(); c.moveTo(-f * 150, G); c.lineTo(-f * 140, tTop + 20); c.lineTo(tx0 + tw / 2, tTop - 60); c.lineTo(f * 40, wTop - 40); c.lineTo(f * 120, wTop + 30); c.lineTo(f * 125, G); c.closePath(); c.fill(); stroke();
+      c.fillStyle = grad('#a8a294', '#7a756a', wTop, G); c.fillRect(-90, wTop + 10, 180, G - wTop - 10); c.strokeStyle = 'rgba(30,25,20,.7)'; c.lineWidth = 2.5; c.strokeRect(-90, wTop + 10, 180, G - wTop - 10);
+      c.strokeStyle = 'rgba(40,35,30,.35)'; c.lineWidth = 1.5; for (let y = wTop + 30; y < G; y += 22) { c.beginPath(); c.moveTo(-90, y); c.lineTo(90, y); c.stroke(); }
+      c.fillStyle = '#3a3f46'; c.beginPath(); c.moveTo(f * 18 - 30, G); c.lineTo(f * 18 - 30, G - 70); c.lineTo(f * 18 + 30, G - 70); c.lineTo(f * 18 + 30, G); c.closePath(); c.fill(); stroke();
+      c.strokeStyle = '#c9a24a'; c.lineWidth = 3; for (const y of [G - 20, G - 50]) { c.beginPath(); c.moveTo(f * 18 - 30, y); c.lineTo(f * 18 + 30, y); c.stroke(); }
+      c.save(); c.translate(f * 18, G - 86); c.rotate(time * 0.6); c.fillStyle = '#c9a24a'; for (let k = 0; k < 8; k++) { c.rotate(Math.PI / 4); c.fillRect(-3, -16, 6, 7); } c.beginPath(); c.arc(0, 0, 11, 0, 7); c.fill(); c.restore();
+      c.fillStyle = '#5e5a52'; c.fillRect(tx0 + tw * 0.6, tTop - 30, 14, 40);
+      if (!low) for (let k = 0; k < 3; k++) { const t2 = (time * 18 + k * 20) % 60; c.fillStyle = `rgba(90,90,90,${0.4 - t2 / 180})`; c.beginPath(); c.arc(tx0 + tw * 0.6 + 7 + Math.sin(time + k) * 5, tTop - 40 - t2, 8 + t2 * 0.2, 0, 7); c.fill(); }
+      c.fillStyle = '#ffb347'; for (const wx of [-60, 56]) c.fillRect(wx - 5, wTop + 40, 10, 14);
+      c.fillStyle = '#7a756a'; c.fillRect(tx0 - 6, tTop - 6, tw + 12, 10); c.fillRect(-96, wTop + 4, 192, 10);
+    } else {
+      // giants: ice fortress with icicles and boulders
+      c.fillStyle = grad('#d8eefc', '#9ec4e0', wTop, G); c.fillRect(-100, wTop, 200, G - wTop); c.strokeStyle = 'rgba(40,80,120,.6)'; c.lineWidth = 2.5; c.strokeRect(-100, wTop, 200, G - wTop);
+      c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1.5; for (let y = wTop + 20; y < G; y += 26) { c.beginPath(); c.moveTo(-100, y); c.lineTo(100, y); c.stroke(); for (let x2 = -100 + ((y / 26) % 2) * 25; x2 < 100; x2 += 50) { c.beginPath(); c.moveTo(x2, y - 26); c.lineTo(x2, y); c.stroke(); } }
+      c.fillStyle = grad('#e4f4ff', '#a8cce6', tTop, G); c.beginPath(); c.moveTo(tx0 - 4, G); c.lineTo(tx0 + 6, tTop); c.lineTo(tx0 + tw - 6, tTop); c.lineTo(tx0 + tw + 4, G); c.closePath(); c.fill(); c.strokeStyle = 'rgba(40,80,120,.6)'; c.stroke();
+      c.fillStyle = 'rgba(230,248,255,.95)'; for (let k = -98; k < 100; k += 14) { const L = 8 + ((k * 31) % 14); c.beginPath(); c.moveTo(k, wTop); c.lineTo(k + 5, wTop + L); c.lineTo(k + 10, wTop); c.closePath(); c.fill(); }
+      for (let k = tx0; k < tx0 + tw; k += 12) { const L = 6 + ((k * 17) % 12); c.beginPath(); c.moveTo(k, tTop + 4); c.lineTo(k + 4, tTop + 4 + L); c.lineTo(k + 8, tTop + 4); c.closePath(); c.fill(); }
+      c.fillStyle = '#1e3a5a'; c.beginPath(); c.moveTo(f * 18 - 28, G); c.lineTo(f * 18 - 28, G - 56); c.quadraticCurveTo(f * 18, G - 90, f * 18 + 28, G - 56); c.lineTo(f * 18 + 28, G); c.closePath(); c.fill();
+      for (const [bx, r] of [[-f * 120, 26], [f * 105, 20], [f * 80, 14]] as [number, number][]) { c.fillStyle = low ? '#8d8578' : (() => { const g = c.createRadialGradient(bx - r * 0.3, G - r - r * 0.3, 2, bx, G - r, r); g.addColorStop(0, '#b0a898'); g.addColorStop(1, '#6e665a'); return g; })(); c.beginPath(); c.arc(bx, G - r + 4, r, 0, 7); c.fill(); c.strokeStyle = 'rgba(30,25,20,.6)'; c.lineWidth = 2; c.stroke(); }
+      c.fillStyle = '#c8e2f2'; c.fillRect(tx0 - 6, tTop - 6, tw + 12, 10); c.fillRect(-104, wTop - 6, 208, 10);
+    }
+    // team banner hanging on the wall
+    c.fillStyle = team; c.beginPath(); c.moveTo(f * 55 - 11, wTop + 8); c.lineTo(f * 55 + 11, wTop + 8); c.lineTo(f * 55 + 11, wTop + 60); c.lineTo(f * 55, wTop + 50); c.lineTo(f * 55 - 11, wTop + 60); c.closePath(); c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1.5; c.stroke();
+    // flag on the tower
+    c.strokeStyle = '#2a1a0c'; c.lineWidth = 3; c.beginPath(); c.moveTo(tx0 + tw / 2, tTop - 20); c.lineTo(tx0 + tw / 2, tTop - 82); c.stroke();
+    const wv = Math.sin(time * 5 + side) * 4;
+    c.fillStyle = team; c.beginPath(); c.moveTo(tx0 + tw / 2, tTop - 82); c.quadraticCurveTo(tx0 + tw / 2 + f * 22, tTop - 80 + wv, tx0 + tw / 2 + f * 44, tTop - 72 + wv); c.lineTo(tx0 + tw / 2, tTop - 58); c.closePath(); c.fill();
+  }
+
   private tombProps() {
     const c = this.ctx;
     for (let x = 520; x < W - 500; x += 330) {
@@ -367,8 +441,12 @@ export class Renderer {
       }
     };
 
-    // ---- main wall (slightly tapered) ----
+    const style = side === 0 ? this.playerArmy : (b.level.faction ?? 'desert');
     const wx0 = -100, wx1 = 100, wTop = G - 140;
+    const tw = 76, tx0 = -f * 82 - tw / 2, tTop = G - 230;
+    if (style !== 'desert') this.factionFort(style, side, f, G, wTop, tx0, tw, tTop, time, low);
+    else {
+    // ---- main wall (slightly tapered) ----
     c.beginPath(); c.moveTo(wx0 - 6, G); c.lineTo(wx0, wTop); c.lineTo(wx1, wTop); c.lineTo(wx1 + 6, G); c.closePath();
     c.fillStyle = mudFill(wx0, wx1, wTop, G); c.fill(); c.strokeStyle = deep; c.lineWidth = 2.5; c.stroke();
     plaster(wx0, wTop, 200, 140);
@@ -414,7 +492,6 @@ export class Renderer {
     for (const wxp of [-60, 62]) { c.fillStyle = side === 0 && region === 'shadow' ? '#ffd27a' : '#2a1a10'; c.beginPath(); c.moveTo(wxp - 6, wTop + 58); c.lineTo(wxp - 6, wTop + 46); c.quadraticCurveTo(wxp, wTop + 36, wxp + 6, wTop + 46); c.lineTo(wxp + 6, wTop + 58); c.closePath(); c.fill(); }
 
     // ---- tower (tapered) at the back ----
-    const tw = 76, tx0 = -f * 82 - tw / 2, tTop = G - 230;
     c.beginPath(); c.moveTo(tx0 - 4, G); c.lineTo(tx0 + 4, tTop); c.lineTo(tx0 + tw - 4, tTop); c.lineTo(tx0 + tw + 4, G); c.closePath();
     c.fillStyle = mudFill(tx0, tx0 + tw, tTop, G); c.fill(); c.strokeStyle = deep; c.lineWidth = 2.5; c.stroke();
     plaster(tx0, tTop, tw, 230);
@@ -435,13 +512,15 @@ export class Renderer {
     c.beginPath(); c.moveTo(tx0 + tw / 2, tTop - 82); c.quadraticCurveTo(tx0 + tw / 2 + f * 22, tTop - 80 + wv, tx0 + tw / 2 + f * 44, tTop - 72 + wv); c.lineTo(tx0 + tw / 2, tTop - 58); c.closePath(); c.fill();
     c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1.5; c.stroke();
 
+    }
     // ---- fort archers: tower top + wall posts for extra ones ----
     if (pct > 0) {
       const posts: [number, number][] = [[tx0 + tw / 2, tTop - 6], [f * -20, wTop], [f * 70, wTop]];
       const atk = b.towerShot[side] > 0 ? Math.sin((1 - b.towerShot[side] / 0.3) * Math.PI) : 0;
       for (let k = 0; k < b.towerArchers[side]; k++) {
         const [ax, ay] = posts[k];
-        const a: Unit = { uid: 990 + side * 3 + k, def: UNITS.archer, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
+        const towerDef = UNITS[({ elves: 'elfarcher', ghosts: 'banshee', zombies: 'skelarcher', dwarves: 'axethrower' } as Record<string, EnemyId>)[style] ?? 'archer'];
+        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
         c.save(); c.translate(ax, ay); c.scale(0.8, 0.8); c.translate(-ax, -ay - 4);
         drawArt({ c, u: a, x: ax, gy: ay, f, t: time + k, swing: 0, atk, side, region, flash: false, tier: a.tier });
         c.restore();
@@ -484,6 +563,8 @@ export class Renderer {
     c.fillStyle = 'rgba(60,35,10,.22)';
     const sw = Math.min(70, u.def.height * 0.45) * (u.def.flying ? 0.7 : 1);
     c.beginPath(); c.ellipse(u.x, groundY + 2, sw, sw * 0.18, 0, 0, 7); c.fill();
+    // team ring at the feet (sides stay readable even in mirror matches)
+    if (!u.dead) { c.strokeStyle = TEAM[u.side]; c.globalAlpha = 0.55; c.lineWidth = 2; c.beginPath(); c.ellipse(u.x, groundY + 2, Math.min(26, sw * 0.8), Math.min(6, sw * 0.16), 0, 0, 7); c.stroke(); c.globalAlpha = 1; }
     if (u === b.controlled) {
       c.strokeStyle = 'rgba(255,224,102,.85)'; c.lineWidth = 3; c.beginPath(); c.ellipse(u.x, groundY + 2, 26, 7, 0, 0, 7); c.stroke();
       c.fillStyle = '#ffe066';
@@ -519,13 +600,14 @@ export class Renderer {
     const wide = ['camel', 'cavalry', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss', 'elephant', 'cobra', 'cobraqueen'].includes(def.id) ? 1.5 : 1;
     const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
     ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
-    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, tier };
+    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, tier };
     const y = def.flying ? GROUND - 30 : GROUND;
     drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 1, swing: 0, atk: 0, side, region: 'oasis', flash: false, tier });
     return cv.toDataURL();
   }
 
   showHp = true;
+  playerArmy = 'desert';
   lastControlled: Unit | null = null;
   private hpBar(u: Unit, gy: number) {
     const c = this.ctx;

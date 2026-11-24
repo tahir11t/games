@@ -2,6 +2,8 @@ import { UNITS, MINER_GOLD, MINER_INTERVAL, MAX_MINERS, MAX_ARMY, CONTROL_BONUS,
 import { costOf, type LevelDef } from '../data/levels';
 import { ABILITIES, passiveFx, type Perks } from '../data/skills';
 import { survivalWave } from '../data/challenges';
+import { factionById, rosterOf, armyCost, armyTrain, type ArmyId } from '../data/factions';
+import { PLAYER_UNITS } from '../data/units';
 import { sfx } from './audio';
 
 export const W = 2400;
@@ -51,6 +53,8 @@ export interface Unit {
   lastDx: number; // movement last frame (for queueing)
   tier: number; // visual tier 0..4
   summonCd: number;
+  stun: number; // seconds stunned
+  stompCd: number;
   dmgText?: FloatText; // merges rapid hits into one rising number
 }
 
@@ -63,6 +67,7 @@ export interface Projectile {
   castle?: Side; // aimed at a fort
   src?: Unit;
   air: boolean; // can hit flying units on a ground impact
+  pierce?: boolean;
 }
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; }
@@ -78,11 +83,13 @@ export interface BattleEvents {
   onRank?(u: Unit): void;
 }
 
-const DEFAULT_PERKS: Perks & { difficulty: Difficulty } = {
+export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId };
+const DEFAULT_PERKS: BattlePerks = {
   unitLevels: Object.fromEntries(Object.keys(UNITS).map((k) => [k, 1])) as Record<UnitId, number>,
   ability: 'volley',
   passives: { mining: 0, walls: 0, treasury: 0, eagle: 0, wisdom: 0, towers: 0 },
   difficulty: 'medium',
+  army: 'desert',
 };
 
 let UID = 1;
@@ -91,6 +98,7 @@ const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 export class Battle {
   units: Unit[] = [];
   projectiles: Projectile[] = [];
+  bolts: { x1: number; y1: number; x2: number; y2: number; life: number }[] = []; // chain lightning
   particles: Particle[] = [];
   texts: FloatText[] = [];
   castleHp: [number, number];
@@ -124,28 +132,38 @@ export class Battle {
   towerCd: [number, number] = [1, 2];
   towerShot: [number, number] = [0, 0]; // anim timers
   towerArchers: [number, number] = [1, 0];
+  /** survival skill cards: stacking bonuses picked between waves */
+  cards = { dmg: 1, speed: 1, gold: 1, horde: 0 };
   stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0, bossKills: 0 };
   private survivalNext = 8;
   private passiveIncome = 0;
   private auras: Unit[] = [];
   private aiThink = 0;
   private aiAttackSize = 5;
-  readonly perks: Perks & { difficulty: Difficulty };
+  private aiTarget: EnemyId | null = null;
+  private playerMiner: EnemyId = 'miner';
+  readonly perks: BattlePerks;
+  readonly roster: EnemyId[]; // the player's unit bar
+  private roles: Partial<Record<EnemyId, UnitId>> = {};
   readonly allowed: UnitId[] | null;
   readonly diff: (typeof DIFFICULTY)[Difficulty];
 
-  constructor(public level: LevelDef, perks: Partial<Perks & { difficulty: Difficulty }> | Record<UnitId, number>, startGold: number, private ev: BattleEvents) {
-    const p = 'unitLevels' in perks ? (perks as Partial<Perks & { difficulty: Difficulty }>) : { unitLevels: perks as Record<UnitId, number> };
+  constructor(public level: LevelDef, perks: Partial<BattlePerks> | Record<UnitId, number>, startGold: number, private ev: BattleEvents) {
+    const p = 'unitLevels' in perks ? (perks as Partial<BattlePerks>) : { unitLevels: perks as Record<UnitId, number> };
     this.perks = { ...DEFAULT_PERKS, ...p, unitLevels: { ...DEFAULT_PERKS.unitLevels, ...p.unitLevels }, passives: { ...DEFAULT_PERKS.passives, ...p.passives } };
     this.diff = DIFFICULTY[this.perks.difficulty];
+    // Playing as a conquered civilization swaps the unit bar (upgrades carry over by role).
+    const army = this.perks.army ?? 'desert';
+    if (army !== 'desert') { const f = factionById(army); this.roster = rosterOf(f); this.roles = f.roles; this.playerMiner = f.miner; }
+    else this.roster = PLAYER_UNITS;
     this.allowed = level.allowed ?? null;
     const fort = 1500 * passiveFx.walls(this.perks.passives.walls);
     this.castleMax = [fort, level.castleHp];
     this.castleHp = [fort, level.castleHp];
     this.gold = Math.max(startGold, level.startGold ?? 0) + passiveFx.treasury(this.perks.passives.treasury);
     if (!level.mods?.noMiners) {
-      this.spawn('miner', 0);
-      this.spawn('miner', 0).x += 20;
+      this.spawn(this.playerMiner, 0);
+      this.spawn(this.playerMiner, 0).x += 20;
     }
     this.towerArchers[1] = (level.towerDmg ?? 0) > 0 ? 1 : 0;
     if (level.ai) {
@@ -161,7 +179,7 @@ export class Battle {
   get playerArmy() { return this.units.filter((u) => u.side === 0 && !u.dead); }
   get enemyStat() { return this.level.enemyMult * this.diff.stat; }
   goldMult(side: Side) {
-    return side === 0 ? (this.level.mods?.goldMult ?? 1) * passiveFx.mining(this.perks.passives.mining) : (this.level.ai?.income ?? 1) * this.diff.income;
+    return side === 0 ? (this.level.mods?.goldMult ?? 1) * passiveFx.mining(this.perks.passives.mining) * this.cards.gold : (this.level.ai?.income ?? 1) * this.diff.income;
   }
   minerCount(side: Side = 0) {
     const q = side === 0 ? this.queue : this.equeue;
@@ -169,32 +187,38 @@ export class Battle {
   }
   armyCount(side: Side = 0) { return this.units.filter((u) => u.side === side && !u.dead).length + (side === 0 ? this.queue : this.equeue).length; }
 
-  isAllowed(id: UnitId) {
-    if (id === 'miner' && this.level.mods?.noMiners) return false;
-    return !this.allowed || this.allowed.includes(id);
+  isAllowed(id: EnemyId) {
+    if (UNITS[id].miner && this.level.mods?.noMiners) return false;
+    if (!this.roster.includes(id)) return false;
+    // challenge restrictions name desert units; a civilization army maps them by role
+    if (!this.allowed) return true;
+    return this.allowed.includes((this.roles[id] ?? id) as UnitId);
   }
+  costOf(id: EnemyId) { return UNITS[id].cost || armyCost(id); }
+  trainTime(id: EnemyId) { return UNITS[id].train || armyTrain(id); }
 
-  canTrain(id: UnitId) {
+  canTrain(id: EnemyId) {
     const d = UNITS[id];
     if (!this.isAllowed(id)) return false;
-    if (this.gold < d.cost) return false;
-    if (id === 'miner' && this.minerCount() >= MAX_MINERS) return false;
+    if (this.gold < this.costOf(id)) return false;
+    if (d.miner && this.minerCount() >= MAX_MINERS) return false;
     if (this.armyCount() >= MAX_ARMY) return false;
     if (d.maxCount && this.units.filter((u) => u.side === 0 && !u.dead && u.def.id === id).length + this.queue.filter((q) => q.id === id).length >= d.maxCount) return false;
     return true;
   }
 
-  train(id: UnitId) {
+  train(id: EnemyId) {
     if (!this.canTrain(id)) return false;
-    this.gold -= UNITS[id].cost;
-    this.queue.push({ id, left: UNITS[id].train });
+    this.gold -= this.costOf(id);
+    this.queue.push({ id, left: this.trainTime(id) });
     sfx('click');
     return true;
   }
 
   spawn(id: EnemyId, side: Side, mult = 1) {
     const def = UNITS[id];
-    const lvlMult = side === 0 ? upgradeMult(this.perks.unitLevels[id as UnitId] ?? 1) : mult;
+    const role = (this.roles[id] ?? id) as UnitId;
+    const lvlMult = side === 0 ? upgradeMult(this.perks.unitLevels[role] ?? 1) : mult;
     const dmgMod = side === 1 ? this.level.mods?.enemyDmg ?? 1 : def.ranged ? passiveFx.eagle(this.perks.passives.eagle) : 1;
     const u: Unit = {
       uid: UID++, def, side,
@@ -203,8 +227,8 @@ export class Battle {
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
       chargeReady: !!def.charge, calm: 0, mineTimer: Math.random() * 2, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0,
-      summonCd: def.summon?.every ?? 0,
-      tier: side === 0 ? tierOf(this.perks.unitLevels[id as UnitId] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
+      summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0,
+      tier: side === 0 ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
     return u;
@@ -321,6 +345,18 @@ export class Battle {
       u.attacking = Math.max(0, u.attacking - dt);
       u.hitFlash = Math.max(0, u.hitFlash - dt);
       u.healFx = Math.max(0, u.healFx - dt);
+      if (u.stun > 0) { u.stun -= dt; u.moving = false; u.attacking = 0; continue; }
+      if (u.def.stomp) {
+        u.stompCd -= dt;
+        const st = u.def.stomp;
+        if (u.stompCd <= 0 && this.units.some((v) => v.side !== u.side && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius)) {
+          u.stompCd = st.every; u.attacking = 0.3;
+          this.shake = Math.min(0.8, this.shake + 0.35); sfx('boom');
+          for (let i = 0; i < 18; i++) this.dust(u.x + (Math.random() - 0.5) * st.radius * 1.6, GROUND - 4, '#c9b28a', 5 + Math.random() * 6);
+          const m = u.side === 0 ? upgradeMult(this.perks.unitLevels[(this.roles[u.def.id] ?? u.def.id) as UnitId] ?? 1) : this.enemyStat;
+          for (const v of this.units) if (v.side !== u.side && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius) { this.applyDamage(v, st.dmg * m, true, u); if (!v.def.boss) v.stun = Math.max(v.stun, st.stun); }
+        }
+      }
       if (u.def.regen && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + u.def.regen * (u.maxHp / u.def.hp) * dt);
       if (u.def.summon) {
         u.summonCd -= dt;
@@ -348,6 +384,8 @@ export class Battle {
 
     for (const p of this.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; }
     this.particles = this.particles.filter((p) => p.life > 0);
+    for (const bo of this.bolts) bo.life -= dt;
+    this.bolts = this.bolts.filter((bo) => bo.life > 0);
     for (const t of this.texts) { t.y -= 30 * dt; t.life -= dt; }
     this.texts = this.texts.filter((t) => t.life > 0);
     this.units = this.units.filter((u) => !u.dead || u.dead < 1.2);
@@ -366,7 +404,7 @@ export class Battle {
     const item = q.shift()!;
     if (side === 0) {
       this.spawn(item.id, 0);
-      const id = item.id as UnitId;
+      const id = (this.roles[item.id] ?? item.id) as UnitId;
       this.producedCounts[id] = (this.producedCounts[id] ?? 0) + 1;
       this.stats.trained++;
       this.ev.onUnitTrained(id);
@@ -399,6 +437,11 @@ export class Battle {
       let i = 0;
       for (const g of survivalWave(this.survivalWave, Math.random)) for (let k = 0; k < g.count && alive + i < MAX_ARMY; k++) this.spawnEnemy(g.unit, g.mult, i++ * 24);
       this.gold += 20 + this.survivalWave * 5;
+      // Horde card: free recruits of your cheapest fighter every wave.
+      if (this.cards.horde) {
+        const cheapest = this.roster.filter((id) => !UNITS[id].miner && this.isAllowed(id)).sort((a, z) => this.costOf(a) - this.costOf(z))[0];
+        for (let k = 0; k < this.cards.horde && cheapest && this.armyCount() < MAX_ARMY; k++) { const u = this.spawn(cheapest, 0); u.x += k * 10; }
+      }
       this.ev.onWave?.(this.survivalWave);
     }
     this.enemyAlert = 0;
@@ -428,42 +471,45 @@ export class Battle {
     return v;
   }
 
-  private pickEnemyUnit(ai: 1 | 2 | 3): EnemyId | null {
-    const pool = this.level.ai!.pool.filter((u) => !UNITS[u].miner);
-    const affordable = pool.filter((u) => costOf(u) <= this.egold);
-    const mine = this.playerArmy.filter((u) => u.def.id !== 'miner');
+  /**
+   * The commander plans its next purchase: a varied army (types it has few of
+   * score higher), counters to the player's army on medium/hard, and it saves
+   * gold for expensive units instead of always buying the cheapest.
+   */
+  private chooseTarget(ai: 1 | 2 | 3): EnemyId | null {
+    const raw = this.level.ai!.pool.filter((u) => !UNITS[u].miner);
+    if (!raw.length) return null;
+    const weight = new Map<EnemyId, number>();
+    for (const u of raw) weight.set(u, (weight.get(u) ?? 0) + 1);
+    const own = new Map<EnemyId, number>();
+    for (const u of this.units) if (u.side === 1 && !u.dead) own.set(u.def.id, (own.get(u.def.id) ?? 0) + 1);
+    for (const q of this.equeue) own.set(q.id, (own.get(q.id) ?? 0) + 1);
+    const mine = this.playerArmy.filter((u) => !u.def.miner);
     const flyers = mine.filter((u) => u.def.flying).length;
-    const counterOf = (id: EnemyId): EnemyId[] => {
+    const ranged = mine.filter((u) => u.def.ranged).length;
+    const fast = mine.filter((u) => u.def.charge || u.def.speed >= 95).length;
+    const tanks = mine.filter((u) => u.def.hp >= 500).length;
+    const n = Math.max(1, mine.length);
+    const scores: [EnemyId, number][] = [];
+    for (const [id, w] of weight) {
       const d = UNITS[id];
-      if (d.flying) return ['archer', 'crossbow', 'sandmage'];
-      if (d.ranged) return ['camel', 'cavalry', 'ghost', 'cobra', 'bandit'];
-      if (d.charge || d.speed > 100) return ['spear'];
-      if (d.hp >= 600) return ['crossbow', 'archer', 'golem'];
-      return ['spear', 'golem', 'mummy', 'sword'];
-    };
-    let choices = affordable;
-    if (ai >= 2 && mine.length) {
-      // Counter the player's most common unit type (medium: sometimes, hard: always).
-      const counts = new Map<EnemyId, number>();
-      for (const u of mine) counts.set(u.def.id, (counts.get(u.def.id) ?? 0) + 1);
-      const top = [...counts].sort((a, b) => b[1] - a[1])[0][0];
-      const wanted = new Set([...counterOf(top), ...(flyers ? ['archer', 'crossbow', 'sandmage'] as EnemyId[] : [])]);
-      const counters = pool.filter((u) => wanted.has(u));
-      if (counters.length && (ai === 3 || Math.random() < 0.55)) {
-        const ok = counters.filter((u) => costOf(u) <= this.egold);
-        if (ok.length) choices = ok;
-        else if (ai === 3 && this.emode !== 'defend') return null; // hard AI saves up for the counter
+      let sc = w / (1 + (own.get(id) ?? 0) * 0.8); // variety
+      if (ai >= 2 && mine.length) {
+        let fit = 0;
+        if (flyers / n > 0.2 && (d.ranged || d.flying)) fit += 1.5;
+        if (ranged / n > 0.35 && (d.speed >= 90 || d.charge || d.dodge || d.flying)) fit += 1.2;
+        if (fast / n > 0.25 && (d.hp >= 300 || (d.bonusVs ?? []).some((b) => mine.some((m) => m.def.id === b)))) fit += 1.2;
+        if (tanks / n > 0.25 && (d.ranged || d.splash || d.crit)) fit += 1.2;
+        if ((d.bonusVs ?? []).some((b) => mine.some((m) => m.def.id === b))) fit += 0.8;
+        sc *= 1 + fit * (ai === 3 ? 1.6 : 1);
       }
-      // Hard AI keeps roughly a third of its army ranged.
-      if (ai === 3) {
-        const own = this.units.filter((u) => u.side === 1 && !u.dead && u.def.id !== 'miner');
-        const rangedShare = own.length ? own.filter((u) => u.def.ranged).length / own.length : 0;
-        const ranged = choices.filter((u) => UNITS[u].ranged);
-        if (rangedShare < 0.3 && ranged.length && Math.random() < 0.6) choices = ranged;
-      }
+      if (ai === 1 && costOf(id) > this.egold + 60) sc *= 0.35; // easy: rarely saves up
+      scores.push([id, sc]);
     }
-    if (!choices.length) return null;
-    return choices[Math.floor(Math.random() * choices.length)];
+    const total = scores.reduce((a, [, v]) => a + v, 0);
+    let r = Math.random() * total;
+    for (const [id, v] of scores) { r -= v; if (r <= 0) return id; }
+    return scores[scores.length - 1][0];
   }
 
   private runCommander(dt: number) {
@@ -479,8 +525,20 @@ export class Battle {
     if (this.minerCount(1) < targetMiners && this.egold >= 50 && this.equeue.length < 2) {
       this.egold -= 50; this.equeue.push({ id: A.miner ?? 'miner', left: UNITS.miner.train });
     } else if (this.equeue.length < 2 && this.armyCount(1) < MAX_ARMY) {
-      const pick = this.pickEnemyUnit(ai);
-      if (pick && costOf(pick) <= this.egold) { this.egold -= costOf(pick); this.equeue.push({ id: pick, left: Math.max(2, UNITS[pick].train || costOf(pick) / 50) }); }
+      if (!this.aiTarget) this.aiTarget = this.chooseTarget(ai);
+      let pick = this.aiTarget;
+      const underAttack = this.playerArmy.some((u) => !u.def.miner && u.x > W * 0.62);
+      const ownArmy = this.units.filter((u) => u.side === 1 && !u.dead && !u.def.miner).length;
+      if (pick && costOf(pick) > this.egold && (underAttack || ownArmy === 0) && this.egold >= 60) {
+        // emergency: something affordable now, keep saving for the plan afterwards
+        const cheap = this.level.ai!.pool.filter((u) => !UNITS[u].miner && costOf(u) <= this.egold).sort((a, z) => costOf(z) - costOf(a));
+        if (cheap.length) pick = cheap[0];
+      }
+      if (pick && costOf(pick) <= this.egold) {
+        this.egold -= costOf(pick);
+        this.equeue.push({ id: pick, left: Math.max(2, UNITS[pick].train || costOf(pick) / 50) });
+        if (pick === this.aiTarget) this.aiTarget = null;
+      }
     }
 
     // Decisions: attack, defend, retreat, raid.
@@ -609,7 +667,7 @@ export class Battle {
       s *= this.level.mods?.enemySpeed ?? 1;
       if (this.level.region === 'shadow') s *= 1.05;
       if (this.debuff > 0) s *= 0.5;
-    } else if (this.buff > 0) s *= 1.4;
+    } else { s *= this.cards.speed; if (this.buff > 0) s *= 1.4; }
     for (const a of this.auras) if (a.def.support && a.side === u.side && a !== u && Math.abs(a.x - u.x) < 160) { s *= 1.15; break; }
     return s;
   }
@@ -749,7 +807,7 @@ export class Battle {
   /** Every outgoing-damage modifier in one place. */
   private outMult(u: Unit, target?: UnitDef) {
     let m = target && u.def.bonusVs?.includes(target.id) ? COUNTER_BONUS : 1;
-    if (u.side === 0 && this.buff > 0) m *= 1.25;
+    if (u.side === 0) { m *= this.cards.dmg; if (this.buff > 0) m *= 1.25; }
     if (u.side === 1 && this.debuff > 0) m *= 0.7;
     for (const h of this.auras) if (h.side === u.side && h !== u && Math.abs(h.x - u.x) < 150) { m *= 1 + h.def.aura!; break; }
     return m;
@@ -786,7 +844,7 @@ export class Battle {
 
   private projKind(u: Unit): Projectile['kind'] {
     const id = u.def.id;
-    return id === 'catapult' ? 'rock' : id === 'fire' ? 'fire' : id === 'crossbow' ? 'bolt' : ['sandmage', 'boss', 'djinn', 'genie', 'phoenix'].includes(id) ? (id === 'phoenix' ? 'fire' : 'magic') : 'arrow';
+    return id === 'catapult' ? 'rock' : id === 'fire' ? 'fire' : id === 'crossbow' ? 'bolt' : ['sandmage', 'boss', 'djinn', 'genie', 'phoenix', 'banshee', 'necromancer', 'lich', 'thunderlord', 'elfqueen', 'poltergeist'].includes(id) ? (id === 'phoenix' ? 'fire' : 'magic') : 'arrow';
   }
 
   /** Guided arc: the shot keeps tracking the target, so moving units are hit. */
@@ -797,7 +855,7 @@ export class Battle {
     const d = Math.abs(foe.x - u.x);
     const T = kind === 'bolt' ? Math.max(0.2, d / 900) : Math.max(0.3, d / 560);
     const arc = kind === 'bolt' ? 8 : kind === 'rock' ? 90 + d * 0.15 : 25 + d * 0.12;
-    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx: foe.x, ty, t: 0, T, arc, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, bonusVs: u.def.bonusVs, target: kind === 'rock' ? undefined : foe, src: u, air: kind !== 'rock' });
+    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx: foe.x, ty, t: 0, T, arc, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, bonusVs: u.def.bonusVs, target: kind === 'rock' ? undefined : foe, src: u, air: kind !== 'rock', pierce: u.def.pierce });
     sfx(kind === 'rock' ? 'throw' : 'arrow');
   }
 
@@ -827,6 +885,27 @@ export class Battle {
     if (primary) {
       this.applyDamage(primary, p.dmg * (p.bonusVs?.includes(primary.def.id) ? COUNTER_BONUS : 1), false, p.src);
       hitAny = true;
+    }
+    if (p.pierce) { // the arrow passes through everyone along its flight
+      const lo = Math.min(p.sx, x), hi = Math.max(p.sx, x);
+      for (const o of this.units) if (o.side === foeSide && !o.dead && o !== primary && o.x >= lo && o.x <= hi) this.applyDamage(o, p.dmg * 0.7, true, p.src);
+      for (let i = 0; i < 6; i++) this.dust(lo + Math.random() * (hi - lo), GROUND - 40, '#cfe8ff', 3);
+    }
+    const ch = p.src?.def.chain;
+    if (ch && primary) { // lightning leaps to nearby foes and stuns them
+      let from = primary;
+      const hit = new Set<Unit>([primary]);
+      if (!primary.def.boss) primary.stun = Math.max(primary.stun, ch.stun);
+      for (let j = 1; j < ch.count; j++) {
+        let next: Unit | null = null, bd = 190;
+        for (const o of this.units) if (o.side === foeSide && !o.dead && !hit.has(o)) { const d = Math.abs(o.x - from.x); if (d < bd) { bd = d; next = o; } }
+        if (!next) break;
+        this.bolts.push({ x1: from.x, y1: this.unitY(from) - from.def.height * 0.5, x2: next.x, y2: this.unitY(next) - next.def.height * 0.5, life: 0.25 });
+        this.applyDamage(next, p.dmg * 0.75, true, p.src);
+        if (!next.def.boss) next.stun = Math.max(next.stun, ch.stun);
+        hit.add(next); from = next;
+      }
+      sfx('volley');
     }
     if (!primary || p.splash) {
       const radius = p.splash || 20;
@@ -875,6 +954,7 @@ export class Battle {
     o.hitFlash = 0.12;
     this.damageNumber(o, dealt, isSplash);
     if (src?.side === 0) this.stats.damage[src.def.id as UnitId] = (this.stats.damage[src.def.id as UnitId] ?? 0) + dealt;
+    if (src?.def.lifesteal && !src.dead && dealt > 0) { src.hp = Math.min(src.maxHp, src.hp + dealt * src.def.lifesteal); src.healFx = Math.max(src.healFx, 0.3); }
     if (o.hp <= 0 && !o.dead) {
       o.dead = 0.001;
       if (o.side === 1) {
@@ -902,6 +982,15 @@ export class Battle {
         }
       }
       for (let i = 0; i < 8; i++) this.dust(o.x, this.unitY(o) - o.def.height * 0.5, o.def.id === 'ghost' || o.def.id === 'djinn' ? '#9fd8ff' : '#f0dcae', 3 + Math.random() * 4);
+      // A lich nearby raises the fallen as a zombie on its own side.
+      if (!o.def.boss && !o.def.miner) {
+        const lich = this.units.find((v) => v.def.raiseDead && !v.dead && v.side !== o.side && Math.abs(v.x - o.x) < 280);
+        if (lich && this.armyCount(lich.side) < MAX_ARMY) {
+          const z = this.spawn(lich.def.raiseDead!, lich.side, lich.side === 1 ? this.enemyStat : 1);
+          z.x = o.x; z.lane = o.lane;
+          for (let i = 0; i < 8; i++) this.dust(o.x, GROUND - 10, '#7dff5c', 4);
+        }
+      }
       if (o.def.explode) { // bloater bursts and hurts everyone nearby on the other side
         const e = o.def.explode;
         for (let i = 0; i < 16; i++) this.dust(o.x, GROUND - 20, i % 2 ? '#8fbf3a' : '#c6e070', 5 + Math.random() * 6);

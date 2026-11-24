@@ -139,6 +139,28 @@ Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on me
   - **Automatic switching every 1/2/3/5 minutes**, chosen in Settings.
 - New regions with weather: falling leaves (forest), fog (graveyard), snowfall (tundra).
 
+## v0.6: play as civilizations, heroes, 10-battle conquests, faction forts, modern music
+
+- **AI fix:** the enemy commander now plans purchases. It builds a varied army, counters yours (medium/hard) and saves gold for expensive units. Before, it only ever bought its cheapest unit.
+- **Play as a conquered civilization ("My Army"):** beat a civilization's 10th battle to unlock its army.
+  - Units borrow the upgrade level of their desert role (e.g. elf archer ← archer), so upgrades carry over.
+  - Your fort changes to that civilization's style.
+  - Challenges always use the desert army.
+- **Heroes with unique powers** (playable when you field that civilization, and enemy mini-bosses in battle 5):
+  - Moon Archer: piercing arrows.
+  - Soul Reaper: life drain.
+  - Lich: raises the fallen as zombies.
+  - Thunder Lord: chain lightning with stun.
+  - Colossus: ground stomp with stun.
+- **New units:** Fairy Sprite, Poltergeist, Ghoul, Rune Priest, Mammoth.
+- **Conquest has 10 battles per civilization:** 🏰 siege at 3 (hold for 120 s), ⭐ hero at 5, 💀 elite at 7 (double gold), 👑 boss at 10.
+- **Faction forts:** elven tree, ghostly gothic keep, zombie palisade with cauldron, dwarven mountain hall, giants' ice fortress. Tower archers match the faction.
+- **Army counter** in the HUD (your fighters ⚔ enemy fighters) and **team rings** at units' feet.
+- **Survival skill cards** every 3 waves: horde, sharpened steel, gold veins, walls, extra archer, veterans, swift feet.
+- **Bolder character style:** bigger heads, expressive eyes with brows, thicker outlines.
+- **Music replaced with 6 modern original tracks:** Epic Rise, Neon Dunes, Desert Trap, Lo-fi Oasis, Night Drive, Hero Anthem.
+  - Side-chained supersaws, 808s, FM keys and plucks, risers and impacts, all synthesized live.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

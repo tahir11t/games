@@ -253,3 +253,20 @@ h1, h2, h3 { margin: 0; }
 .fu { display: flex; flex-direction: column; align-items: center; width: 70px; } .fu img { width: 54px; height: 54px; background: rgba(0,0,0,.25); border-radius: 10px; } .fu small { font-size: 10.5px; color: var(--sand2); text-align: center; } .fu.boss img { border: 2px solid #e0453a; }
 .fac-battles { display: flex; gap: 10px; justify-content: center; padding: 6px 0; } .fac-battles .lvl { width: 92px; aspect-ratio: 1.15; }
 @media (max-height: 430px) { .fu { width: 58px; } .fu img { width: 42px; height: 42px; } .fac-battles .lvl { width: 72px; font-size: 18px; } .fac-units { margin: 2px 0; } }
+
+/* ---------- v0.6 ---------- */
+.army-count { font-size: 15px; gap: 4px; } .army-count b:first-of-type { color: #7dff9a; } .army-count b:last-of-type { color: #ff8a7a; } .army-count i { font-style: normal; opacity: .6; }
+.ubtn.hero { border-color: var(--gold2); box-shadow: 0 0 10px rgba(255,211,77,.5); }
+.fac-battles { flex-wrap: wrap; max-width: 620px; margin: 0 auto; } .fac-battles .lvl { width: 100px; }
+.tag-legend { text-align: center; font-size: 12px; color: var(--sand2); margin: 2px 0 6px; }
+.fu.hero img { border: 2px solid var(--gold2); }
+.army-list { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 10px; padding: 10px 0; overflow-y: auto; align-content: start; touch-action: pan-y; }
+.army-card { background: var(--panel2); border: 2px solid #8a6236; border-radius: 16px; padding: 8px 12px; color: var(--sand); text-align: start; display: flex; flex-direction: column; gap: 6px; }
+.army-card.on { border-color: var(--gold2); box-shadow: 0 0 0 3px rgba(255,211,77,.25); } .army-card.locked { filter: grayscale(.85) brightness(.7); }
+.army-head { display: flex; align-items: center; gap: 10px; } .army-head img { width: 56px; height: 56px; background: rgba(0,0,0,.25); border-radius: 12px; } .army-head b { font-size: 17px; display: block; }
+.army-units { display: flex; flex-wrap: wrap; gap: 3px; } .army-units img { width: 34px; height: 34px; background: rgba(0,0,0,.2); border-radius: 8px; }
+.cards-pick { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.skill-card { width: 150px; min-height: 170px; border-radius: 16px; border: 3px solid var(--gold2); background: linear-gradient(170deg, #f7e7c0, #e0c08a); color: var(--ink); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 10px; box-shadow: 0 8px 20px rgba(0,0,0,.4); transition: transform .1s; }
+.skill-card:hover, .skill-card:active { transform: translateY(-4px) scale(1.03); }
+.sc-ico { font-size: 42px; } .skill-card b { font-size: 16px; } .skill-card small { font-size: 12px; color: #5a3a1c; text-align: center; }
+@media (max-height: 430px) { .fac-battles .lvl { width: 72px; } .skill-card { width: 128px; min-height: 140px; } .sc-ico { font-size: 32px; } .army-count { font-size: 13px; } }

@@ -9,6 +9,7 @@ export const ENEMY_COST: Partial<Record<EnemyId, number>> = {
   gravedigger: 50, zombie: 50, runner: 70, bloater: 150, skelarcher: 120, abomination: 520, necromancer: 260,
   dwarfminer: 60, axethrower: 170, shieldwall: 260, berserker: 220, cannon: 600, gyrocopter: 280,
   goblin: 50, goblinspear: 70, ogre: 380, troll: 340, cyclops: 560, frostgiant: 820,
+  sprite: 170, moonarcher: 900, poltergeist: 230, soulreaper: 950, ghoul: 240, lich: 900, runepriest: 220, thunderlord: 1000, mammoth: 750, colossus: 1200,
 };
 export const costOf = (u: EnemyId) => ENEMY_COST[u] ?? 200;
 
@@ -55,6 +56,7 @@ export interface LevelDef {
   winAfter?: number; // survive this many seconds to win (siege challenge)
   towerDmg?: number; // enemy fort archer strength (0 = no tower)
   enemyColor?: string; // faction colour for the enemy fort and banners
+  faction?: string; // enemy civilization (fort style)
 }
 
 export const REGIONS: { id: RegionId; from: number; to: number; enemy: EnemyId }[] = [
@@ -69,7 +71,7 @@ export const LEVEL_COUNT = 50;
 export const regionOf = (i: number): RegionId => REGIONS.find((r) => i >= r.from && i <= r.to)!.id;
 
 /** Per-level difficulty factors produced by scripts/tune.ts (1 = untuned). */
-export const TUNE: number[] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.6, 2.8, 3.47, 3.08, 2.92, 2.9, 2.9, 2.71, 2.08, 2.3, 2.3, 2.28, 2.3, 2.29, 2.15, 2.15, 2.13, 2.06, 1.69, 1.93, 1.9, 1.86, 1.91, 1.91, 1.91, 1.76, 1.76, 1.72, 1.43, 1.76, 1.72, 1.76, 1.78, 1.68, 1.63, 1.66, 1.61, 1.66, 0.74];
+export const TUNE: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 2, 2.6, 2.8, 2.94, 2.53, 2.56, 2.46, 2.46, 2.38, 1.95, 2.36, 2.25, 2.28, 2.1, 2.08, 2, 1.98, 1.98, 1.9, 1.67, 2.05, 1.82, 1.98, 1.85, 1.91, 1.91, 1.76, 1.76, 1.72, 1.43, 1.76, 1.72, 1.76, 1.78, 1.68, 1.63, 1.66, 1.61, 1.66, 0.74];
 
 export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef {
   const region = regionOf(index);

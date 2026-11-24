@@ -38,6 +38,7 @@ export interface SaveData {
   conquestStars: Record<string, number>; // 'elves-3' -> stars
   musicRotate: number; // minutes between automatic track changes (0 = off)
   showHp: boolean;
+  army: string; // 'desert' or a conquered civilization
   dailyDone: string | null;
   updatedAt: number;
 }
@@ -85,6 +86,7 @@ export function defaultSave(): SaveData {
     conquestStars: {},
     musicRotate: 0,
     showHp: true,
+    army: 'desert',
     survivalBest: 0,
     dailyDone: null,
     updatedAt: Date.now(),

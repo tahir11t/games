@@ -87,58 +87,53 @@ export function sfx(name: 'click' | 'hit' | 'swing' | 'arrow' | 'throw' | 'boom'
 }
 
 // ---------------- Music ----------------
-// A small look-ahead sequencer: notes are scheduled on the audio clock (not
-// setInterval timing), so rhythm stays steady even when the game is busy.
-type Voice = 'oud' | 'ney' | 'qanun' | 'horn';
+// Modern, original tracks synthesized live (no audio files): punchy drums,
+// 808s, side-chained supersaw chords, plucks and strings. Notes are scheduled
+// on the audio clock with a look-ahead so timing stays tight.
 type Deg = number | null;
-interface Section { melody: Deg[]; chords: number[]; drums: string; counter?: Deg[] }
-interface Track { id: string; bpm: number; root: number; scale: number[]; lead: Voice; counterVoice?: Voice; pad: boolean; sections: Record<string, Section>; order: string[] }
+type ChordInst = 'supersaw' | 'rhodes' | 'strings' | 'pad';
+type LeadInst = 'pluck' | 'bell' | 'saw' | 'brass';
+type BassStyle = 'offbeat' | 'root8' | '808' | 'arp';
+interface Drums { kick: string; snare: string; hat: string; open?: string; clap?: string; }
+interface Track { id: string; bpm: number; root: number; scale: number[]; chords: number[][]; chordInst: ChordInst; lead: LeadInst; bass: BassStyle; drums: Drums; melodyA: Deg[]; melodyB: Deg[]; order: string[]; swing?: number; crackle?: boolean; strings16?: boolean }
 
-const HIJAZ = [0, 1, 4, 5, 7, 8, 10];
-const BAYATI = [0, 1.5, 3, 5, 7, 8, 10];
-const RAST = [0, 2, 3.5, 5, 7, 9, 10.5];
-const NAHAWAND = [0, 2, 3, 5, 7, 8, 11];
-const KURD = [0, 1, 3, 5, 7, 8, 10];
-const AJAM = [0, 2, 4, 5, 7, 9, 11];
+const MINOR = [0, 2, 3, 5, 7, 8, 10];
+const PHRYG_DOM = [0, 1, 4, 5, 7, 8, 10]; // the "Arabian" colour, used in a modern way
+const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+const DORIAN = [0, 2, 3, 5, 7, 9, 10];
 const _ = null;
 
 export const TRACKS: Track[] = [
-  { id: 'caravan', bpm: 100, root: 146.83, scale: HIJAZ, lead: 'oud', counterVoice: 'ney', pad: true, order: ['A', 'A', 'B', 'A', 'C', 'B'],
-    sections: {
-      A: { melody: [4, 5, 4, 3, 2, _, 1, 0, 1, 2, 3, _, 4, _, _, _, 4, 5, 6, 5, 4, 3, 2, _, 3, 2, 1, _, 0, _, _, _], chords: [0, 3, 4, 0], drums: 'D..TT.D.T..TD.T.' },
-      B: { melody: [7, _, 6, 5, 4, 5, 4, _, 3, 4, 5, _, 6, 5, 4, _, 7, 8, 7, 6, 5, 4, 3, _, 2, 1, 2, 3, 1, 0, _, _], chords: [4, 3, 1, 0], drums: 'D..TT.D.T..TD.TT', counter: [_, _, _, _, 11, _, _, _, _, _, _, _, 9, _, _, _, _, _, _, _, 10, _, _, _, _, _, _, _, 7, _, _, _] },
-      C: { melody: [0, _, _, _, _, _, 0, _, 4, _, _, _, 3, _, 1, _, 0, _, _, _, _, _, _, _, 4, 3, 2, 1, 0, _, _, _], chords: [0, 0, 4, 0], drums: 'D.TTD.T.DDT.D.TT' },
-    } },
-  { id: 'oasis', bpm: 72, root: 196, scale: BAYATI, lead: 'ney', counterVoice: 'qanun', pad: true, order: ['A', 'B', 'A', 'C'],
-    sections: {
-      A: { melody: [0, _, 1, 2, 3, _, _, _, 2, 1, 2, _, _, _, _, _, 4, 3, 2, 1, 0, _, 1, _, 0, _, _, _, _, _, _, _], chords: [0, 3, 2, 0], drums: 'D.......T...T...' },
-      B: { melody: [4, _, 5, 4, 3, _, 4, _, 5, _, _, _, 7, _, 6, 5, 4, _, 3, _, 2, 3, 4, _, 3, _, _, _, _, _, _, _], chords: [3, 4, 5, 3], drums: 'D.......T.T.T...', counter: [7, _, _, _, 9, _, _, _, 8, _, _, _, 11, _, _, _, 9, _, _, _, 8, _, _, _, 7, _, _, _, _, _, _, _] },
-      C: { melody: [2, _, _, _, 1, _, _, _, 0, _, _, _, _, _, _, _, 4, _, _, _, 3, _, 2, _, 1, _, _, _, 0, _, _, _], chords: [0, 1, 4, 0], drums: 'D.......D...T...' },
-    } },
-  { id: 'drums', bpm: 132, root: 110, scale: KURD, lead: 'horn', counterVoice: 'oud', pad: false, order: ['A', 'B', 'A', 'C'],
-    sections: {
-      A: { melody: [0, _, 0, _, 3, _, 2, _, 0, _, 0, 1, 2, _, _, _, 4, _, 4, _, 3, _, 2, 1, 0, _, _, _, _, _, _, _], chords: [0, 0, 3, 0], drums: 'D.TDD.T.D.TDDKTK' },
-      B: { melody: [4, _, 5, _, 7, _, 5, 4, 3, _, 4, _, 5, _, _, _, 7, 6, 5, 4, 3, 2, 1, _, 0, _, 1, _, 0, _, _, _], chords: [3, 4, 5, 0], drums: 'D.TDD.TKD.TDDKTK', counter: [0, 0, 3, _, 0, 0, 4, _, 0, 0, 3, _, 5, 4, 3, _, 0, 0, 3, _, 0, 0, 4, _, 3, 2, 1, _, 0, _, _, _] },
-      C: { melody: [_, _, _, _, _, _, _, _, 0, _, _, _, 0, _, _, _, _, _, _, _, _, _, _, _, 4, _, 3, _, 2, _, 1, _], chords: [0, 0, 0, 0], drums: 'DDTDDKTDDDTDDKTT' },
-    } },
-  { id: 'djinn', bpm: 90, root: 130.81, scale: NAHAWAND, lead: 'qanun', counterVoice: 'ney', pad: true, order: ['A', 'B', 'A', 'B', 'C'],
-    sections: {
-      A: { melody: [0, 2, 4, 7, 6, 4, 2, 4, 5, 4, 2, 1, 2, _, _, _, 0, 2, 4, 6, 7, 6, 4, 3, 2, 3, 1, 0, _, _, _, _], chords: [0, 5, 3, 4], drums: 'D...T..TD...T.T.' },
-      B: { melody: [7, 9, 11, 9, 7, 6, 4, 6, 7, 6, 4, 3, 4, _, _, _, 2, 4, 6, 4, 2, 1, 0, 1, 2, 1, 0, _, _, _, _, _], chords: [5, 3, 4, 0], drums: 'D...T..TD..TT.T.', counter: [7, _, _, _, _, _, _, _, 8, _, _, _, _, _, _, _, 6, _, _, _, _, _, _, _, 4, _, _, _, _, _, _, _] },
-      C: { melody: [0, _, _, _, 4, _, _, _, 3, _, _, _, 2, _, _, _, 0, _, _, _, 6, _, _, _, 4, _, 3, _, 0, _, _, _], chords: [0, 0, 5, 4], drums: 'D.......T.......' },
-    } },
-  { id: 'dabke', bpm: 138, root: 174.61, scale: RAST, lead: 'oud', counterVoice: 'horn', pad: false, order: ['A', 'A', 'B', 'C'],
-    sections: {
-      A: { melody: [0, 2, 4, 2, 4, 5, 4, 2, 3, 2, 1, 2, 0, _, 0, _, 4, 5, 7, 5, 4, 2, 3, 4, 2, 1, 0, 1, 0, _, _, _], chords: [0, 4, 3, 0], drums: 'D.KTD.KTD.KTDKKT' },
-      B: { melody: [7, _, 7, 8, 9, 8, 7, 5, 4, 5, 7, _, 5, 4, 2, _, 4, 5, 4, 2, 0, 2, 4, _, 3, 2, 1, 2, 0, _, _, _], chords: [4, 4, 3, 0], drums: 'D.KTD.KTD.KTDKKT', counter: [0, _, 4, _, 0, _, 4, _, 3, _, 4, _, 0, _, 4, _, 0, _, 4, _, 0, _, 4, _, 3, _, 4, _, 0, _, _, _] },
-      C: { melody: [0, _, _, _, 0, _, _, _, 4, _, 4, _, 4, _, _, _, 3, 3, 3, _, 2, 2, 2, _, 1, 2, 3, 4, 0, _, _, _], chords: [0, 0, 4, 0], drums: 'DKKTDKKTDKKTDKTT' },
-    } },
-  { id: 'forest', bpm: 96, root: 220, scale: AJAM, lead: 'qanun', counterVoice: 'ney', pad: true, order: ['A', 'B', 'A', 'C'],
-    sections: {
-      A: { melody: [0, 2, 4, 7, 4, 2, 4, _, 5, 4, 2, 4, 1, _, _, _, 0, 2, 4, 7, 9, 7, 4, _, 5, 4, 3, 1, 0, _, _, _], chords: [0, 5, 3, 4], drums: 'D.......T...T.T.' },
-      B: { melody: [7, _, 9, 7, 6, _, 4, _, 5, _, 7, 5, 4, _, _, _, 3, _, 4, 5, 6, 5, 4, _, 2, 3, 4, 1, 2, _, _, _], chords: [3, 4, 5, 1], drums: 'D.....T.T...T.T.', counter: [7, _, _, _, 11, _, _, _, 10, _, _, _, 9, _, _, _, 8, _, _, _, 9, _, _, _, 8, _, _, _, 7, _, _, _] },
-      C: { melody: [4, _, _, _, 2, _, _, _, 0, _, _, _, _, _, _, _, 5, _, _, _, 4, _, 2, _, 4, _, _, _, 0, _, _, _], chords: [0, 3, 4, 0], drums: 'D...............' },
-    } },
+  { id: 'rise', bpm: 92, root: 73.42, scale: MINOR, chordInst: 'strings', lead: 'brass', bass: 'root8', strings16: true,
+    chords: [[0, 2, 4], [5, 0, 2], [3, 5, 0], [4, 6, 1]], order: ['intro', 'A', 'B', 'break', 'A', 'B'],
+    drums: { kick: 'x.....x...x.....', snare: '....x.......x...', hat: '..x...x...x...x.' },
+    melodyA: [7, _, _, _, 9, _, 10, _, 11, _, _, _, 9, _, _, _, 12, _, _, _, 11, _, 10, _, 9, _, _, _, _, _, _, _],
+    melodyB: [14, _, _, _, 12, _, 11, _, 12, _, _, _, 9, _, 10, _, 11, _, _, _, 10, _, 9, _, 7, _, _, _, _, _, _, _] },
+  { id: 'neon', bpm: 124, root: 110, scale: PHRYG_DOM, chordInst: 'supersaw', lead: 'pluck', bass: 'offbeat',
+    chords: [[0, 2, 4], [1, 3, 5], [5, 0, 2], [4, 6, 1]], order: ['intro', 'A', 'B', 'A', 'break', 'B'],
+    drums: { kick: 'x...x...x...x...', snare: '................', clap: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.', open: '..x...x...x...x.' },
+    melodyA: [7, 8, 11, 8, 7, _, 4, 5, 7, _, 8, 7, 5, 4, 2, _, 7, 8, 11, 12, 11, 8, 7, _, 5, 4, 5, 7, 4, _, _, _],
+    melodyB: [14, _, 12, 11, 12, _, 11, 8, 11, _, 8, 7, 8, _, 5, 7, 7, 8, 7, 5, 4, _, 5, 4, 1, 2, 4, 5, 0, _, _, _] },
+  { id: 'trap', bpm: 140, root: 87.31, scale: MINOR, chordInst: 'pad', lead: 'bell', bass: '808',
+    chords: [[0, 2, 4], [5, 0, 2], [3, 5, 0], [4, 6, 1]], order: ['intro', 'A', 'B', 'A', 'B'],
+    drums: { kick: 'x......x..x.....', snare: '........x.......', hat: 'xxx.x.xxx.x.xxxx', open: '..............x.' },
+    melodyA: [7, _, 10, _, 9, _, 7, _, 5, _, 7, _, 3, _, _, _, 7, _, 10, _, 12, _, 10, 9, 7, _, _, _, _, _, _, _],
+    melodyB: [12, _, 10, _, 12, 14, 12, _, 10, _, 9, _, 7, _, _, _, 5, _, 7, _, 9, _, 7, 5, 3, _, 2, _, 0, _, _, _] },
+  { id: 'lofi', bpm: 78, root: 130.81, scale: DORIAN, chordInst: 'rhodes', lead: 'bell', bass: 'root8', swing: 0.28, crackle: true,
+    chords: [[0, 2, 4, 6], [3, 5, 0, 2], [1, 3, 5, 0], [4, 6, 1, 3]], order: ['A', 'B', 'A', 'intro'],
+    drums: { kick: 'x.......x.x.....', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.' },
+    melodyA: [_, _, 9, _, 11, _, 9, 7, _, _, _, _, 6, _, 7, _, _, _, 11, _, 12, _, 11, 9, 7, _, _, _, _, _, _, _],
+    melodyB: [_, _, 14, _, 13, _, 11, _, 9, _, _, _, 11, _, 9, 7, _, _, 9, _, 8, _, 7, _, 4, _, _, _, _, _, _, _] },
+  { id: 'synthwave', bpm: 108, root: 98, scale: MINOR, chordInst: 'pad', lead: 'saw', bass: 'arp',
+    chords: [[0, 2, 4], [5, 0, 2], [6, 1, 3], [4, 6, 1]], order: ['intro', 'A', 'B', 'break', 'A', 'B'],
+    drums: { kick: 'x...x...x...x...', snare: '....x.......x...', hat: '..x...x...x...x.' },
+    melodyA: [7, _, _, 9, 10, _, 9, _, 7, _, _, _, 5, _, 4, _, 7, _, _, 9, 10, _, 12, _, 11, _, _, _, _, _, _, _],
+    melodyB: [12, _, 11, _, 10, _, 9, _, 10, _, 9, _, 7, _, _, _, 9, _, 10, _, 11, _, 12, _, 14, _, _, _, _, _, _, _] },
+  { id: 'anthem', bpm: 128, root: 116.54, scale: MAJOR, chordInst: 'supersaw', lead: 'saw', bass: 'offbeat',
+    chords: [[0, 2, 4], [4, 6, 1], [5, 0, 2], [3, 5, 0]], order: ['intro', 'A', 'B', 'A', 'break', 'B'],
+    drums: { kick: 'x...x...x...x...', snare: '....x.......x...', clap: '....x.......x...', hat: '..x...x...x...x.', open: '..x...x...x...x.' },
+    melodyA: [7, _, 9, _, 11, _, 9, 7, 8, _, 9, _, 11, _, _, _, 11, _, 12, _, 14, _, 12, 11, 9, _, 11, _, 7, _, _, _],
+    melodyB: [14, _, _, 12, 14, _, 15, _, 14, _, 12, _, 11, _, _, _, 12, _, 11, _, 9, _, 11, _, 7, _, _, _, _, _, _, _] },
 ];
 
 function note(track: Track, deg: number, octave = 0) {
@@ -149,81 +144,124 @@ function note(track: Track, deg: number, octave = 0) {
 }
 
 let reverb: ConvolverNode | null = null;
-function musicOut() {
+let duck: GainNode | null = null; // side-chained bus (chords + bass pump with the kick)
+let satCurve: Float32Array | null = null;
+function buses() {
   const c = ac();
   if (!reverb) {
-    // generated impulse response: a short, warm hall
     reverb = c.createConvolver();
-    const len = Math.floor(c.sampleRate * 2.2);
+    const len = Math.floor(c.sampleRate * 2.4);
     const ir = c.createBuffer(2, len, c.sampleRate);
-    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+    for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
     reverb.buffer = ir;
-    const wet = c.createGain(); wet.gain.value = 0.28;
+    const wet = c.createGain(); wet.gain.value = 0.22;
     reverb.connect(wet).connect(master!);
+    duck = c.createGain(); duck.gain.value = 1; duck.connect(musicBus!);
+    satCurve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; satCurve[i] = Math.tanh(x * 2.5); }
   }
-  return musicBus!;
+  return { out: musicBus!, rev: reverb!, duck: duck! };
 }
-function send(node: AudioNode) { node.connect(musicOut()); node.connect(reverb!); }
-
-function env(g: GainNode, at: number, a: number, peak: number, d: number) {
-  g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(peak, at + a); g.gain.exponentialRampToValueAtTime(0.0001, at + a + d);
+function osc(type: OscillatorType, freq: number, at: number, end: number) { const o = ac().createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, at); o.start(at); o.stop(end); return o; }
+function gainEnv(at: number, a: number, peak: number, hold: number, r: number) {
+  const g = ac().createGain(); g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(peak, at + a); g.gain.setValueAtTime(peak, at + a + hold); g.gain.exponentialRampToValueAtTime(0.0001, at + a + hold + r); return g;
 }
 
-function play(v: Voice | 'pad' | 'bass', freq: number, dur: number, vol: number, at: number) {
-  const c = ac();
+function kick(at: number) {
+  const { out, duck: d } = buses();
+  const o = osc('sine', 160, at, at + 0.4); o.frequency.exponentialRampToValueAtTime(42, at + 0.12);
+  const g = gainEnv(at, 0.002, 0.9, 0.02, 0.3); o.connect(g).connect(out);
+  noise(0.012, 0.25, 3000, Math.max(0, at - ac().currentTime), musicBus, 'highpass'); // click
+  // pump the side-chained bus
+  d.gain.cancelScheduledValues(at); d.gain.setValueAtTime(0.35, at); d.gain.linearRampToValueAtTime(1, at + 0.22);
+}
+function snare(at: number) {
+  const { out, rev } = buses(); const w = Math.max(0, at - ac().currentTime);
+  noise(0.18, 0.32, 1800, w, musicBus, 'bandpass'); noise(0.1, 0.18, 6000, w, musicBus, 'highpass');
+  const o = osc('triangle', 190, at, at + 0.12); o.frequency.exponentialRampToValueAtTime(120, at + 0.1); const g = gainEnv(at, 0.001, 0.25, 0, 0.1); o.connect(g); g.connect(out); g.connect(rev);
+}
+function clap(at: number) { const w = Math.max(0, at - ac().currentTime); for (const dt of [0, 0.012, 0.024]) noise(0.09, 0.2, 1400, w + dt, musicBus, 'bandpass'); }
+function hat(at: number, open: boolean) { noise(open ? 0.22 : 0.035, open ? 0.08 : 0.07, 8500, Math.max(0, at - ac().currentTime), musicBus, 'highpass'); }
+
+function chord(inst: ChordInst, freqs: number[], dur: number, at: number) {
+  const c = ac(); const { duck: d, rev } = buses();
+  const f = c.createBiquadFilter(); f.type = 'lowpass';
   const g = c.createGain();
-  if (v === 'oud') {
-    // plucked: two detuned saws through a closing low-pass, plus a pick click
-    const o1 = c.createOscillator(), o2 = c.createOscillator(); o1.type = 'sawtooth'; o2.type = 'sawtooth'; o1.frequency.value = freq; o2.frequency.value = freq * 1.005;
-    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 4; f.frequency.setValueAtTime(3200, at); f.frequency.exponentialRampToValueAtTime(380, at + Math.min(0.9, dur));
-    env(g, at, 0.004, vol, Math.min(1.2, dur * 1.3));
-    o1.connect(f); o2.connect(f); f.connect(g); send(g);
-    o1.start(at); o2.start(at); o1.stop(at + dur * 1.4 + 0.1); o2.stop(at + dur * 1.4 + 0.1);
-    noise(0.015, vol * 0.5, 4000, Math.max(0, at - c.currentTime), musicBus, 'highpass');
-  } else if (v === 'qanun') {
-    const o1 = c.createOscillator(), o2 = c.createOscillator(); o1.type = 'triangle'; o2.type = 'sine'; o1.frequency.value = freq; o2.frequency.value = freq * 2;
-    const g2 = c.createGain(); g2.gain.value = 0.35;
-    env(g, at, 0.003, vol, Math.min(1.4, dur * 1.6));
-    o1.connect(g); o2.connect(g2).connect(g); send(g);
-    o1.start(at); o2.start(at); o1.stop(at + dur * 1.7 + 0.1); o2.stop(at + dur * 1.7 + 0.1);
-  } else if (v === 'ney') {
-    const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = freq;
-    const lfo = c.createOscillator(); lfo.frequency.value = 5.2; const lg = c.createGain(); lg.gain.setValueAtTime(0, at); lg.gain.linearRampToValueAtTime(freq * 0.012, at + 0.25); lfo.connect(lg).connect(o.frequency);
-    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(vol, at + 0.09); g.gain.setValueAtTime(vol * 0.9, at + dur * 0.8); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.15);
-    o.connect(g); send(g); o.start(at); lfo.start(at); o.stop(at + dur + 0.2); lfo.stop(at + dur + 0.2);
-    noise(dur * 0.9, vol * 0.06, freq * 3, Math.max(0, at - c.currentTime), musicBus, 'bandpass');
-  } else if (v === 'horn') {
-    const o1 = c.createOscillator(), o2 = c.createOscillator(); o1.type = 'sawtooth'; o2.type = 'square'; o1.frequency.value = freq; o2.frequency.value = freq * 0.5;
-    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(600, at); f.frequency.linearRampToValueAtTime(1600, at + 0.08);
-    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(vol, at + 0.05); g.gain.setValueAtTime(vol * 0.8, at + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.1);
-    o1.connect(f); o2.connect(f); f.connect(g); send(g); o1.start(at); o2.start(at); o1.stop(at + dur + 0.15); o2.stop(at + dur + 0.15);
-  } else if (v === 'pad') {
-    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
-    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(vol, at + dur * 0.35); g.gain.linearRampToValueAtTime(vol * 0.8, at + dur * 0.8); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.4);
-    for (const d of [0.996, 1, 1.004]) { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq * d; o.connect(f); o.start(at); o.stop(at + dur + 0.5); }
-    f.connect(g); send(g);
-  } else { // bass
-    const o = c.createOscillator(); o.type = 'triangle'; o.frequency.value = freq;
-    const o2 = c.createOscillator(); o2.type = 'sine'; o2.frequency.value = freq * 0.5;
-    env(g, at, 0.01, vol, dur);
-    o.connect(g); o2.connect(g); g.connect(musicOut()); o.start(at); o2.start(at); o.stop(at + dur + 0.1); o2.stop(at + dur + 0.1);
+  if (inst === 'supersaw') {
+    f.frequency.setValueAtTime(2600, at); f.Q.value = 0.7;
+    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(0.045, at + 0.02); g.gain.setValueAtTime(0.04, at + dur * 0.85); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.2);
+    for (const fr of freqs) for (const det of [-0.012, -0.005, 0, 0.005, 0.012]) { const o = osc('sawtooth', fr * (1 + det), at, at + dur + 0.3); o.connect(f); }
+  } else if (inst === 'rhodes') {
+    f.frequency.value = 2200;
+    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(0.06, at + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.6);
+    for (const fr of freqs) { // FM electric piano
+      const car = osc('sine', fr, at, at + dur + 0.7); const mod = osc('sine', fr * 2, at, at + dur + 0.7); const mg = c.createGain();
+      mg.gain.setValueAtTime(fr * 1.2, at); mg.gain.exponentialRampToValueAtTime(fr * 0.05, at + 0.6); mod.connect(mg).connect(car.frequency); car.connect(f);
+    }
+  } else if (inst === 'strings') {
+    f.frequency.value = 1800;
+    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(0.035, at + dur * 0.3); g.gain.setValueAtTime(0.035, at + dur * 0.8); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.5);
+    for (const fr of freqs) for (const det of [-0.006, 0.006]) { const o = osc('sawtooth', fr * (1 + det), at, at + dur + 0.6); const lfo = osc('sine', 5, at, at + dur + 0.6); const lg = c.createGain(); lg.gain.value = fr * 0.004; lfo.connect(lg).connect(o.frequency); o.connect(f); }
+  } else { // pad
+    f.frequency.setValueAtTime(500, at); f.frequency.linearRampToValueAtTime(1400, at + dur * 0.5); f.frequency.linearRampToValueAtTime(700, at + dur);
+    g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(0.03, at + dur * 0.25); g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.6);
+    for (const fr of freqs) for (const det of [-0.008, 0.008]) { const o = osc(det < 0 ? 'sawtooth' : 'square', fr * (1 + det), at, at + dur + 0.7); o.connect(f); }
+  }
+  f.connect(g); g.connect(d); g.connect(rev);
+}
+
+function lead(inst: LeadInst, freq: number, dur: number, at: number) {
+  const c = ac(); const { out, rev } = buses();
+  const f = c.createBiquadFilter(); f.type = 'lowpass';
+  let g: GainNode;
+  if (inst === 'pluck') {
+    f.frequency.setValueAtTime(5000, at); f.frequency.exponentialRampToValueAtTime(600, at + 0.25); f.Q.value = 5;
+    g = gainEnv(at, 0.002, 0.07, 0, Math.min(0.5, dur + 0.2));
+    osc('sawtooth', freq, at, at + 0.8).connect(f); osc('square', freq * 2.003, at, at + 0.8).connect(f);
+  } else if (inst === 'bell') {
+    f.frequency.value = 6000;
+    g = gainEnv(at, 0.002, 0.08, 0, Math.min(1.4, dur + 0.8));
+    const car = osc('sine', freq, at, at + 1.8), mod = osc('sine', freq * 3.5, at, at + 1.8), mg = c.createGain();
+    mg.gain.setValueAtTime(freq * 2, at); mg.gain.exponentialRampToValueAtTime(freq * 0.1, at + 1); mod.connect(mg).connect(car.frequency); car.connect(f);
+  } else if (inst === 'brass') {
+    f.frequency.setValueAtTime(500, at); f.frequency.linearRampToValueAtTime(2200, at + 0.08); f.frequency.linearRampToValueAtTime(1200, at + dur);
+    g = gainEnv(at, 0.03, 0.06, Math.max(0, dur - 0.1), 0.15);
+    for (const det of [-0.004, 0.004]) osc('sawtooth', freq * (1 + det), at, at + dur + 0.3).connect(f);
+  } else { // saw lead with vibrato
+    f.frequency.value = 3200;
+    g = gainEnv(at, 0.01, 0.05, Math.max(0, dur - 0.05), 0.18);
+    for (const det of [-0.006, 0.006]) { const o = osc('sawtooth', freq * (1 + det), at, at + dur + 0.3); const lfo = osc('sine', 5.5, at, at + dur + 0.3); const lg = c.createGain(); lg.gain.setValueAtTime(0, at); lg.gain.linearRampToValueAtTime(freq * 0.008, at + 0.2); lfo.connect(lg).connect(o.frequency); o.connect(f); }
+  }
+  f.connect(g); g.connect(out); g.connect(rev);
+}
+
+function bassNote(style: BassStyle, freq: number, dur: number, at: number, glideTo?: number) {
+  const c = ac(); const { duck: d } = buses();
+  if (style === '808') {
+    const o = osc('sine', freq, at, at + dur + 0.2);
+    if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, at + dur * 0.5);
+    const sh = c.createWaveShaper(); sh.curve = satCurve;
+    const g = gainEnv(at, 0.005, 0.32, dur * 0.6, dur * 0.5);
+    o.connect(sh).connect(g).connect(musicBus!);
+  } else {
+    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(style === 'arp' ? 1400 : 900, at); f.frequency.exponentialRampToValueAtTime(260, at + dur);
+    const g = gainEnv(at, 0.004, 0.16, dur * 0.5, dur * 0.4);
+    osc('sawtooth', freq, at, at + dur + 0.1).connect(f); osc('sine', freq * 0.5, at, at + dur + 0.1).connect(f);
+    f.connect(g).connect(d);
   }
 }
 
-function drum(kind: string, at: number) {
-  const c = ac();
-  const when = Math.max(0, at - c.currentTime);
-  if (kind === 'D') { // darbuka "dum": pitch-dropping body + thud
-    const o = c.createOscillator(); o.type = 'sine'; const g = c.createGain();
-    o.frequency.setValueAtTime(150, at); o.frequency.exponentialRampToValueAtTime(58, at + 0.18);
-    env(g, at, 0.003, 0.42, 0.28); o.connect(g).connect(musicOut()); o.start(at); o.stop(at + 0.35);
-    noise(0.06, 0.08, 400, when, musicBus);
-  } else if (kind === 'T') { // "tek": bright rim
-    noise(0.05, 0.16, 6000, when, musicBus, 'highpass');
-    const o = c.createOscillator(); o.type = 'square'; o.frequency.value = 1100; const g = c.createGain(); env(g, at, 0.001, 0.03, 0.03); o.connect(g).connect(musicOut()); o.start(at); o.stop(at + 0.05);
-  } else if (kind === 'K') { // "ka" / clap
-    noise(0.09, 0.13, 1600, when, musicBus, 'bandpass');
-  }
+function riser(at: number, len: number) {
+  const c = ac(); const s0 = c.createBufferSource();
+  const buf = c.createBuffer(1, Math.floor(c.sampleRate * len), c.sampleRate); const dd = buf.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1;
+  s0.buffer = buf; const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2; f.frequency.setValueAtTime(400, at); f.frequency.exponentialRampToValueAtTime(8000, at + len);
+  const g = c.createGain(); g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.12, at + len);
+  s0.connect(f).connect(g).connect(musicBus!); s0.start(at);
+}
+function impact(at: number) {
+  const o = osc('sine', 90, at, at + 1.2); o.frequency.exponentialRampToValueAtTime(30, at + 1);
+  const g = gainEnv(at, 0.003, 0.5, 0.05, 1); o.connect(g).connect(musicBus!); g.connect(buses().rev);
+  noise(0.6, 0.18, 900, Math.max(0, at - ac().currentTime), musicBus);
 }
 
 let current: string | null = null;
@@ -232,14 +270,14 @@ let rotateTimer: number | undefined;
 let rotateMin = 0;
 export function currentTrack() { return current; }
 
-/** 'auto' picks by context: calm menu, battle, boss fights, regions. */
+/** 'auto' picks by context: chill menu, energetic battles, epic bosses, moody regions. */
 export function autoTrack(context: 'menu' | 'battle' | 'boss', region?: string) {
-  if (context === 'menu') return 'oasis';
-  if (context === 'boss') return 'drums';
-  if (region === 'shadow' || region === 'tombs' || region === 'graveyard') return 'djinn';
-  if (region === 'forest' || region === 'tundra') return 'forest';
-  if (region === 'mountains') return 'dabke';
-  return 'caravan';
+  if (context === 'menu') return 'lofi';
+  if (context === 'boss') return 'rise';
+  if (region === 'shadow' || region === 'tombs' || region === 'graveyard') return 'trap';
+  if (region === 'forest' || region === 'tundra') return 'synthwave';
+  if (region === 'mountains') return 'anthem';
+  return 'neon';
 }
 
 /** Switch to the next track every N minutes (0 = off). */
@@ -263,39 +301,55 @@ export function playTrack(id: string, force = false) {
   stopMusic();
   if (!musicOn) return;
   const c = ac();
+  buses();
   current = track.id;
   armRotation();
-  const step = 60 / track.bpm / 4; // 16th note
+  const step = 60 / track.bpm / 4;
   let i = 0;
-  let next = c.currentTime + 0.08;
-  // section/bar bookkeeping: each section is 4 bars of 16 sixteenths
+  let next = c.currentTime + 0.1;
   const tick = () => {
     if (!musicOn) return;
     try {
-      while (next < c.currentTime + 0.15) {
+      while (next < c.currentTime + 0.16) {
         const bar = Math.floor(i / 16);
-        const secName = track.order[Math.floor(bar / 4) % track.order.length];
-        const sec = track.sections[secName];
-        const s16 = i % 16, barInSec = bar % 4;
-        const d = sec.drums[s16];
-        if (d && d !== '.') drum(d, next);
-        if (s16 % 2 === 1 && track.bpm >= 120) noise(0.02, 0.03, 9000, Math.max(0, next - c.currentTime), musicBus, 'highpass'); // riq shimmer
-        if (i % 2 === 0) {
-          const k = ((barInSec * 16 + s16) / 2) % sec.melody.length;
-          const m = sec.melody[k];
-          if (m !== null && m !== undefined) {
-            let hold = 1; while (hold < 4 && sec.melody[(k + hold) % sec.melody.length] === null) hold++;
-            play(track.lead, note(track, m, 1), step * 2 * hold, track.lead === 'ney' ? 0.075 : track.lead === 'horn' ? 0.05 : 0.07, next);
-          }
-          const cm = sec.counter?.[k];
-          if (cm !== null && cm !== undefined && track.counterVoice) play(track.counterVoice, note(track, cm, 0), step * 6, 0.035, next);
-        }
+        const sec = track.order[Math.floor(bar / 4) % track.order.length];
+        const barIn = bar % 4, s16 = i % 16;
+        const at = next + (track.swing && s16 % 2 === 1 ? step * track.swing : 0);
+        const full = sec === 'A' || sec === 'B';
+        const D = track.drums;
+        if (full || sec === 'break' && barIn === 3) {
+          if (D.kick[s16] === 'x' && (full || s16 < 8)) kick(at);
+          if (D.snare[s16] === 'x') snare(at);
+          if (D.clap?.[s16] === 'x') clap(at);
+          if (D.hat[s16] === 'x') hat(at, false);
+          if (D.open?.[s16] === 'x') hat(at, true);
+          if (track.bass === '808' && s16 % 2 === 1 && D.hat[s16] === 'x' && Math.random() < 0.3) { hat(at + step / 2, false); } // hat rolls
+        } else if (sec === 'intro' && s16 % 4 === 0 && bar % 2 === 1) hat(at, false);
+        if (track.crackle && s16 % 4 === 0) noise(0.05, 0.015, 3000, Math.max(0, at - c.currentTime), musicBus, 'bandpass');
+        const prog = track.chords[barIn];
         if (s16 === 0) {
-          const root = sec.chords[barInSec];
-          if (track.pad) [0, 2, 4].forEach((o) => play('pad', note(track, root + o, 0), step * 15, 0.018, next));
-          play('bass', note(track, root, -1), step * 3, 0.13, next);
-        } else if (s16 === 8 || (track.bpm >= 120 && s16 % 4 === 0)) {
-          play('bass', note(track, sec.chords[barInSec] + (s16 === 8 ? 4 : 0), -1), step * 2.5, 0.1, next);
+          chord(track.chordInst, prog.map((d2) => note(track, d2, 1)), step * 16, at);
+          if (bar % 4 === 0 && sec === 'A') impact(at);
+          if (sec === 'break' && barIn === 2) riser(at, step * 32);
+        }
+        if (track.strings16 && full) { const d2 = prog[(s16 >> 1) % prog.length]; if (s16 % 2 === 0) lead('pluck', note(track, d2, 1), step * 1.5, at); }
+        // bass
+        if (full || sec === 'break') {
+          const r = note(track, prog[0], -1);
+          if (track.bass === 'offbeat' && s16 % 4 === 2) bassNote('offbeat', r, step * 1.6, at);
+          else if (track.bass === 'root8' && s16 % 2 === 0) bassNote('root8', r, step * 1.8, at);
+          else if (track.bass === 'arp' && s16 % 2 === 0) bassNote('arp', note(track, prog[(s16 >> 1) % prog.length], -1), step * 1.8, at);
+          else if (track.bass === '808' && D.kick[s16] === 'x') bassNote('808', r, step * 6, at, s16 === 10 ? r * 1.5 : undefined);
+        }
+        // melody (8th notes, held across rests)
+        if (s16 % 2 === 0 && (full || sec === 'intro' && bar % 2 === 1)) {
+          const mel = sec === 'B' ? track.melodyB : track.melodyA;
+          const k = (barIn * 8 + s16 / 2) % mel.length;
+          const m = mel[k];
+          if (m !== null && m !== undefined) {
+            let hold = 1; while (hold < 6 && mel[(k + hold) % mel.length] === null) hold++;
+            lead(track.lead, note(track, m, 1), step * 2 * hold * 0.9, at);
+          }
         }
         next += step;
         i++;
@@ -307,7 +361,6 @@ export function playTrack(id: string, force = false) {
 }
 
 export function startMusic(context: 'menu' | 'battle' | 'boss', choice = 'auto', region?: string) {
-  // With rotation on, keep whatever is playing (the timer moves to the next track).
   if (rotateMin > 0 && current && schedTimer) return;
   playTrack(choice === 'auto' ? autoTrack(context, region) : choice);
 }
