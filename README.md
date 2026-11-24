@@ -13,7 +13,7 @@ npm run build      # production build in dist/
 
 Every push to `main` deploys to GitHub Pages through `.github/workflows/pages.yml`.
 
-Desktop keys: `1–6` train units · `E` take/release control · `A`/`D` move · `Space` attack · `Q` commander ability.
+Desktop keys: `1–9` train units · `Shift`+`1–9` toggle auto-train · `F` change formation · `E` take/release control · `A`/`D` move · `Space` attack (tap on time for a Perfect strike) · `Q` commander ability.
 
 ## What's implemented (PRD mapping)
 
@@ -35,7 +35,7 @@ Desktop keys: `1–6` train units · `E` take/release control · `A`/`D` move ·
 | §7 IAP (remove ads, starter pack, gems) | ⏳ needs Play Billing |
 | §8 Stickman art, gold vs. dark-red armies, no blood (dust/sparks), parallax backgrounds | ✅ procedural canvas art |
 | §8 Oriental music (Hijaz-scale melody + doumbek) and SFX | ✅ synthesized with WebAudio, so no licensing needed |
-| §8 Arabic + English, full RTL | ✅ |
+| §8 Arabic + English, full RTL | ✅ (v1.0: 8 languages, 3 of them RTL) |
 | §9 Offline-first, encrypted local save + cloud backup | ✅ checksummed local save + Supabase |
 | §9 Analytics events (`tutorial_step`, `level_start/complete/fail`, `unit_spawned`, `upgrade_purchased`, `ad_offer_shown/ad_watched`, `session_length`) | ✅ sent to Supabase |
 | §9 Max 40 units per army, landscape, thumb-reachable controls | ✅ |
@@ -203,6 +203,66 @@ Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on me
 - **Legendary entrance:** a light pillar and shockwave when a hero or legend is summoned.
 - **Fort rage:** below 30% fort health, fort archers fire twice as fast, with a red pulse.
 
+## v1.0: eight languages, new character art, ten new features
+
+### Languages
+- **8 languages:** Arabic, English, French, Spanish, Turkish, Indonesian, Persian and Urdu.
+- Each language has its own file (`src/i18n-fr.ts`, `-es`, `-id`, `-fa`, `-ur`) in the same format as `src/i18n-tr.ts`. Missing keys fall back to English.
+- **Right-to-left:** Arabic, Persian and Urdu switch the whole UI to RTL (`LANGS` in `src/i18n.ts` holds the direction and number locale of each language).
+- Fonts: Persian uses Vazirmatn and Urdu uses Noto Naskh Arabic; numbers use each language's own digits.
+- The first launch picks the device language.
+- `npx tsx scripts/i18n-check.ts` reports missing, extra or untranslated keys in every language file.
+
+### "Neo" character art (`src/game/art.ts`)
+Every character was redrawn. The old circles and stroked lines are replaced by:
+- Slimmer, heroic proportions (a smaller head).
+- Two-segment tapered limbs with knees and elbows, a real stride, and boots that lift.
+- Cel shading with a hard light edge from the sun, and outlines tinted from each fill colour instead of a uniform black line.
+- Flowing scarves in the army's accent colour, billowing capes, and small expressive eyes.
+- Rebuilt animals and monsters:
+  - Jointed big cats.
+  - Feathered birds of prey.
+  - Ridden camels, horses and elk with seated riders.
+  - Domed elephants and mammoths with segmented trunks.
+  - Low-poly faceted golems with glowing seams.
+  - A segmented scorpion, an armoured sand worm, a coiled cobra, and a membrane-winged dragon.
+
+![Before and after: the v0.9 art compared with the v1.0 Neo art](docs/art-v1.png)
+
+Everything is still procedural, so the game ships no image files. `art-gallery.html` (open it on the dev server) shows every unit with options for tier, side, walking and attacking.
+
+### Ten new features
+1. **Oasis Well:** a well in mid-field.
+   - The army with more troops around it takes it over.
+   - The holder earns gold (+5 every 3 s) and its troops near the well heal.
+   - Its banner, capture ring and minimap dot show who holds it.
+2. **Supply drops:** about once a minute a crate parachutes onto mid-field. The first fighter to touch it claims it: gold, half an ability charge, or +25% health for the army.
+3. **Formations** (HUD button, `F` key):
+   - Line: no change.
+   - Wedge: melee faster and stronger, but takes more damage.
+   - Shield Wall: takes less damage, melee slower.
+   - Skirmish: ranged units get more range, melee less damage.
+4. **Tribal bonds:** several units of one kind give that kind a bonus. Both armies have them (enemy units count as their desert equivalent).
+   - Archer Bond: 4+ archers.
+   - Phalanx: 3+ spearmen.
+   - Riders' Bond: 2+ riders.
+   - Sword Brothers: 6+ swordsmen.
+   - Active bonds show in the HUD.
+5. **Last Stand:** once per battle, when your fort drops below 25%, it fires a shockwave that throws back and stuns nearby attackers.
+6. **Perfect strike:** while you control a unit, a timing ring closes around it. Tap ⚔ as it glows cyan for ×1.6 damage.
+7. **Auto-train:** hold a unit button for 1 s (or right-click it, or `Shift`+number) to train that unit automatically whenever you can afford it.
+8. **Scout report:** the pre-battle screen shows every enemy type the level fields and the units you own that counter them.
+9. **Codex:** an encyclopedia of every unit with an animated preview, stats, strengths and counters. Enemies are revealed the first time you meet or scout them. It also has a page explaining the battle mechanics.
+10. **Victory card:** a Share button on the victory screen builds a 1200×630 image (MVP portrait, stars, kills, time) and opens the share sheet, or downloads it where sharing isn't supported.
+
+Also new:
+- Vibration feedback (Settings → Vibration).
+- Banners that fire together stack instead of overlapping.
+- The settings screen scrolls properly on short phones.
+- Damage numbers no longer flip on RTL pages.
+
+**Balance:** the bot was re-run on every script. Medium campaign win rate is 86% (87% before, 24 runs per level). Hard with +3 upgrades is 47% (45% before, 20 runs per level). Conquest is unchanged within noise. Last Stand made the Siege and Stampede challenges easier, so their factors in `CH_TUNE` were raised slightly (siege 1.21 → 1.3, stampede 0.27 → 0.28).
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.
@@ -233,7 +293,8 @@ Enemy waves are generated from a gold **budget** that grows each level, so wave 
 ```
 src/
   main.ts          screens, HUD, tutorial, ads/rewards flow
-  i18n.ts          Arabic/English strings, RTL switching
+  i18n.ts          Arabic/English strings, language list (LANGS), RTL switching
+  i18n-*.ts        tr, fr, es, id, fa, ur translations
   save.ts          local save, Supabase cloud save + analytics
   data/units.ts    unit stats (PRD §5) and upgrade formulas
   data/levels.ts   40 levels: regions, wave budgets, tuning
@@ -243,6 +304,7 @@ src/
   game/render.ts   canvas renderer (world, forts, effects)
   game/art.ts      character art for all units and monsters
   game/audio.ts    synthesized music + SFX
-scripts/           headless balance + tuning
+scripts/           headless balance + tuning, i18n-check.ts
+art-gallery.html   dev page that draws every unit
 supabase/          SQL migrations
 ```

@@ -18,6 +18,27 @@ export const MAX_TOWER_ARCHERS = 3;
 export const tierOf = (lvl: number) => Math.min(4, Math.floor(lvl / 5));
 
 export type Mode = 'defend' | 'hold' | 'attack';
+/** Player army formation: trade-offs picked during battle ('line' = no change). */
+export type Formation = 'line' | 'wedge' | 'wall' | 'skirmish';
+export const FORMATIONS: Formation[] = ['line', 'wedge', 'wall', 'skirmish'];
+/** Tribal bonds: fielding several units of one role gives that role a bonus (both armies). */
+export type BondId = 'volley' | 'phalanx' | 'charge' | 'brothers';
+export const BONDS: Record<BondId, { roles: UnitId[]; need: number; icon: string }> = {
+  volley: { roles: ['archer', 'crossbow'], need: 4, icon: '🏹' }, // +6% ranged damage
+  phalanx: { roles: ['spear'], need: 3, icon: '🛡️' }, // spearmen take 10% less damage
+  charge: { roles: ['camel', 'cavalry', 'lion'], need: 2, icon: '🐪' }, // +6% speed and damage
+  brothers: { roles: ['sword'], need: 6, icon: '⚔️' }, // swordsmen +5% damage
+};
+/** Enemy units that count toward a bond like their desert counterpart. */
+const BOND_ALIAS: Partial<Record<EnemyId, UnitId>> = {
+  bandit: 'sword', skeleton: 'sword', zombie: 'sword', runner: 'sword', bladedancer: 'sword', berserker: 'sword', goblinspear: 'spear', shieldwall: 'spear', specter: 'spear',
+  elfarcher: 'archer', skelarcher: 'archer', axethrower: 'archer', sandmage: 'archer', elkrider: 'cavalry', hyena: 'lion',
+};
+/** The Oasis Well in mid-field: hold it to earn gold and heal nearby troops. */
+export const WELL_X = W / 2;
+export const WELL_R = 140;
+export type DropKind = 'gold' | 'charge' | 'heal';
+export interface SupplyDrop { x: number; y: number; kind: DropKind; life: number; landed: boolean; }
 export type Side = 0 | 1;
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -78,7 +99,7 @@ export interface Particle { x: number; y: number; vx: number; vy: number; life: 
 export interface FloatText { x: number; y: number; text: string; life: number; color: string; size?: number; value?: number; }
 export interface QueueItem { id: EnemyId; left: number; }
 
-export interface BattleStats { trained: number; kills: number; lost: number; mined: number; damage: Partial<Record<UnitId, number>>; enemyMinersKilled: number; bossKills: number; }
+export interface BattleStats { trained: number; kills: number; lost: number; mined: number; damage: Partial<Record<UnitId, number>>; enemyMinersKilled: number; bossKills: number; perfect: number; drops: number; wellTime: number; }
 
 export interface BattleEvents {
   onEnd(win: boolean): void;
@@ -88,6 +109,11 @@ export interface BattleEvents {
   onRush?(): void;
   onStreak?(n: number, bonus: number): void;
   onRage?(): void;
+  onLastStand?(): void;
+  onWell?(owner: Side): void;
+  onDrop?(kind: DropKind, side: Side): void;
+  onPerfect?(): void;
+  onSpawn?(id: EnemyId, side: Side): void;
 }
 
 export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId; extra?: EnemyId[] };
@@ -100,6 +126,10 @@ const DEFAULT_PERKS: BattlePerks = {
 };
 
 let UID = 1;
+const PERFECT_EARLY = 0.12, PERFECT_LATE = 0.3, PERFECT_BONUS = 1.6;
+const WELL_GOLD = 5, WELL_HEAL = 0.012; // gold per 3 s, share of max HP per second
+const DROP_GOLD = 120;
+const LAST_STAND_AT = 0.25, LAST_STAND_R = 420;
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
 export class Battle {
@@ -146,13 +176,25 @@ export class Battle {
   rush = 0; // gold rush timer (both mines yield double)
   private rushNext = 70 + Math.random() * 40;
   holdX = W / 2 - 80; // rally flag for "hold"
-  fx: { kind: 'slash' | 'spark' | 'pillar' | 'ring'; x: number; y: number; f: number; life: number; max: number }[] = [];
+  fx: { kind: 'slash' | 'spark' | 'pillar' | 'ring' | 'shock'; x: number; y: number; f: number; life: number; max: number }[] = [];
   streak = 0;
   private streakT = 0;
   rage = false;
   finale = 0; // victory slow-motion timer
   finaleX = 0;
-  stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0, bossKills: 0 };
+  stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0, bossKills: 0, perfect: 0, drops: 0, wellTime: 0 };
+  formation: Formation = 'line';
+  /** -1..1: >= 1 the player holds the well, <= -1 the enemy does. */
+  well = { progress: 0, owner: -1 as -1 | Side, tick: 0 };
+  drops: SupplyDrop[] = [];
+  private dropNext = 38 + Math.random() * 14;
+  lastStand = false; // the fort's one-time shockwave has fired
+  bonds: [Set<BondId>, Set<BondId>] = [new Set(), new Set()];
+  /** units the player set to train automatically (long-press a unit button) */
+  repeat = new Set<EnemyId>();
+  private repeatIdx = 0;
+  perfectFx = 0;
+  private bondT = 0;
   private survivalNext = 8;
   private passiveIncome = 0;
   private auras: Unit[] = [];
@@ -249,7 +291,119 @@ export class Battle {
       tier: side === 0 ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
+    this.ev.onSpawn?.(id, side);
     return u;
+  }
+
+  /** The desert role a unit counts as (civilization armies map by role). */
+  roleOf(u: Unit): EnemyId { return u.side === 0 ? (this.roles[u.def.id] ?? u.def.id) : u.def.id; }
+  private bondRole(u: Unit): UnitId { const r = this.roleOf(u); return (u.side === 1 ? BOND_ALIAS[r] ?? r : r) as UnitId; }
+  hasBond(side: Side, b: BondId) { return this.bonds[side].has(b); }
+  private bondOf(u: Unit): BondId | null {
+    const r = this.bondRole(u);
+    for (const [id, b] of Object.entries(BONDS) as [BondId, (typeof BONDS)[BondId]][]) if (b.roles.includes(r)) return this.bonds[u.side].has(id) ? id : null;
+    return null;
+  }
+  private updateBonds() {
+    for (const side of [0, 1] as Side[]) {
+      const counts = new Map<BondId, number>();
+      for (const u of this.units) {
+        if (u.side !== side || u.dead) continue;
+        const r = this.bondRole(u);
+        for (const [id, b] of Object.entries(BONDS) as [BondId, (typeof BONDS)[BondId]][]) if (b.roles.includes(r)) counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      const next = new Set<BondId>();
+      for (const [id, n] of counts) if (n >= BONDS[id].need) next.add(id);
+      this.bonds[side] = next;
+    }
+  }
+  setFormation(f: Formation) { this.formation = f; sfx('click'); }
+  toggleRepeat(id: EnemyId) { if (this.repeat.has(id)) this.repeat.delete(id); else this.repeat.add(id); sfx('click'); }
+  /** A fresh tap of the attack pad: perfectly timed taps (just as the weapon is ready) hit harder. */
+  private perfectArmed = false;
+  pressAttack() {
+    this.ctrlAttack = true;
+    const u = this.controlled;
+    this.perfectArmed = !!u && u.cd <= PERFECT_EARLY && u.cd > -PERFECT_LATE;
+  }
+
+  /** The Oasis Well: the side with more fighters around it slowly takes it over. */
+  private updateWell(dt: number) {
+    const w = this.well;
+    let n0 = 0, n1 = 0;
+    for (const u of this.units) {
+      if (u.dead || u.def.miner || u.hidden || Math.abs(u.x - WELL_X) > WELL_R) continue;
+      if (u.side === 0) n0++; else n1++;
+    }
+    if (n0 !== n1) {
+      const push = Math.min(3, Math.abs(n0 - n1)) * 0.11 * dt * (n0 > n1 ? 1 : -1);
+      w.progress = Math.max(-1, Math.min(1, w.progress + push));
+    } else if (!n0 && w.owner === -1) w.progress *= 1 - dt * 0.1; // an empty, unclaimed well drifts back to neutral
+    const prev = w.owner;
+    if (w.progress >= 1) w.owner = 0;
+    else if (w.progress <= -1) w.owner = 1;
+    else if ((w.owner === 0 && w.progress <= 0) || (w.owner === 1 && w.progress >= 0)) w.owner = -1;
+    if (w.owner !== prev && w.owner !== -1) {
+      this.ev.onWell?.(w.owner);
+      for (let i = 0; i < 12; i++) this.dust(WELL_X + (Math.random() - 0.5) * 60, GROUND - 30, w.owner === 0 ? '#ffd34d' : '#ff6b5a', 4);
+    }
+    if (w.owner === -1) return;
+    if (w.owner === 0) this.stats.wellTime += dt;
+    w.tick += dt;
+    for (const u of this.units) if (u.side === w.owner && !u.dead && u.hp < u.maxHp && Math.abs(u.x - WELL_X) < WELL_R) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * WELL_HEAL * dt);
+    if (w.tick >= 3) {
+      w.tick -= 3;
+      if (w.owner === 0) { this.gold += WELL_GOLD; this.texts.push({ x: WELL_X, y: GROUND - 90, text: `+${WELL_GOLD}`, life: 0.9, color: '#ffd34d' }); }
+      else this.egold += WELL_GOLD;
+    }
+  }
+
+  /** Supply crates parachute onto mid-field; the first fighter to touch one claims it. */
+  private updateDrops(dt: number) {
+    this.dropNext -= dt;
+    if (this.dropNext <= 0 && !this.over) {
+      this.dropNext = 48 + Math.random() * 22;
+      const kinds: DropKind[] = ['gold', 'charge', 'heal'];
+      this.drops.push({ x: W * (0.36 + Math.random() * 0.28), y: -40, kind: kinds[Math.floor(Math.random() * 3)], life: 26, landed: false });
+    }
+    for (const d of this.drops) {
+      d.life -= dt;
+      if (!d.landed) { d.y += 120 * dt; if (d.y >= GROUND - 10) { d.y = GROUND - 10; d.landed = true; this.dust(d.x, GROUND - 4, '#d9c08a', 5); } continue; }
+      let taker: Unit | null = null, bd = 24;
+      for (const u of this.units) {
+        if (u.dead || u.def.miner || u.def.flying || u.hidden) continue;
+        const dd = Math.abs(u.x - d.x);
+        if (dd < bd) { bd = dd; taker = u; }
+      }
+      if (taker) { d.life = 0; this.claimDrop(d, taker.side); }
+    }
+    if (this.drops.length) this.drops = this.drops.filter((d) => d.life > 0);
+  }
+  private claimDrop(d: SupplyDrop, side: Side) {
+    sfx('coin');
+    for (let i = 0; i < 10; i++) this.dust(d.x, GROUND - 16, side === 0 ? '#ffe066' : '#ff8a6a', 4);
+    if (d.kind === 'gold') { if (side === 0) this.gold += DROP_GOLD; else this.egold += DROP_GOLD; }
+    else if (d.kind === 'charge') { if (side === 0) this.ability = Math.min(1, this.ability + 0.5); else this.eability = Math.min(1, this.eability + 0.5); }
+    else for (const u of this.units) if (u.side === side && !u.dead) { u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.25); u.healFx = 1; }
+    if (side === 0) { this.stats.drops++; this.texts.push({ x: d.x, y: GROUND - 70, text: d.kind === 'gold' ? `+${DROP_GOLD}` : d.kind === 'charge' ? '⚡+50%' : '✚25%', life: 1.2, color: '#ffe066', size: 18 }); }
+    this.ev.onDrop?.(d.kind, side);
+  }
+
+  /** Below 25% health the player's fort fires one shockwave that throws back and stuns attackers. */
+  private checkLastStand() {
+    if (this.lastStand || this.castleHp[0] <= 0 || this.castleHp[0] / this.castleMax[0] >= LAST_STAND_AT) return;
+    this.lastStand = true;
+    const x0 = CASTLE_X[0];
+    this.fx.push({ kind: 'shock', x: x0 + 40, y: GROUND, f: 1, life: 0.9, max: 0.9 });
+    this.shake = Math.min(1, this.shake + 0.6); sfx('boom');
+    for (let i = 0; i < 24; i++) this.dust(x0 + 60 + Math.random() * 300, GROUND - 6, '#d9c08a', 5 + Math.random() * 6);
+    for (const v of this.units) {
+      if (v.side !== 1 || v.dead || Math.abs(v.x - x0) > LAST_STAND_R) continue;
+      v.x += v.def.boss ? 40 : 150;
+      v.stun = Math.max(v.stun, v.def.boss ? 0.6 : 1.6);
+      this.applyDamage(v, 60 + this.level.index * 2, true);
+    }
+    this.ev.onLastStand?.();
   }
 
   setMode(m: Mode) { this.mode = m; sfx('click'); }
@@ -355,6 +509,16 @@ export class Battle {
     this.streakT -= dt;
     if (this.streakT <= 0) this.streak = 0;
     if (!this.rage && this.castleHp[0] > 0 && this.castleHp[0] / this.castleMax[0] < 0.3) { this.rage = true; this.ev.onRage?.(); }
+    this.checkLastStand();
+    this.perfectFx = Math.max(0, this.perfectFx - dt);
+    this.bondT -= dt;
+    if (this.bondT <= 0) { this.bondT = 0.5; this.updateBonds(); }
+    this.updateWell(dt);
+    this.updateDrops(dt);
+    if (this.repeat.size && this.queue.length < 2) { // auto-train: cycle through the units set to repeat
+      const ids = [...this.repeat];
+      for (let k = 0; k < ids.length; k++) { const id = ids[(this.repeatIdx + k) % ids.length]; if (this.canTrain(id)) { this.train(id); this.repeatIdx = (this.repeatIdx + k + 1) % ids.length; break; } }
+    }
     this.rushNext -= dt;
     if (this.rushNext <= 0) { this.rush = 12; this.rushNext = 80 + Math.random() * 50; this.ev.onRush?.(); }
     for (const e of this.fx) e.life -= dt;
@@ -739,13 +903,18 @@ export class Battle {
       s *= this.level.mods?.enemySpeed ?? 1;
       if (this.level.region === 'shadow') s *= 1.05;
       if (this.debuff > 0) s *= 0.5;
-    } else { s *= this.cards.speed; if (this.buff > 0) s *= 1.4; }
+    } else {
+      s *= this.cards.speed; if (this.buff > 0) s *= 1.4;
+      if (!u.def.ranged && !u.def.miner) { if (this.formation === 'wedge') s *= 1.12; else if (this.formation === 'wall') s *= 0.82; }
+    }
+    if (this.bondOf(u) === 'charge') s *= 1.06;
     for (const a of this.auras) if (a.def.support && a.side === u.side && a !== u && Math.abs(a.x - u.x) < 160) { s *= 1.15; break; }
     return s;
   }
 
   private rangeOf(u: Unit) {
-    return u.side === 0 && u.def.ranged ? u.def.range * passiveFx.eagle(this.perks.passives.eagle) : u.def.range;
+    if (u.side !== 0 || !u.def.ranged) return u.def.range;
+    return u.def.range * passiveFx.eagle(this.perks.passives.eagle) * (this.formation === 'skirmish' ? 1.15 : 1);
   }
 
   private updateFighter(u: Unit, dt: number) {
@@ -753,7 +922,7 @@ export class Battle {
     const def = u.def;
     const range = this.rangeOf(u);
     const isCtrl = u === this.controlled;
-    const dmgMult = isCtrl ? CONTROL_BONUS : 1;
+    const dmgMult = 1;
     const foeSide: Side = u.side === 0 ? 1 : 0;
     const enemyCastle = CASTLE_X[foeSide];
 
@@ -766,6 +935,13 @@ export class Battle {
         const foe = this.nearestFoe(u, range + 8);
         u.attacking = 0.3; u.calm = 0;
         u.cd = def.cooldown * 0.85;
+        let dmgMult = CONTROL_BONUS;
+        if (this.perfectArmed) { // tapped right as the weapon came ready
+          this.perfectArmed = false;
+          dmgMult *= PERFECT_BONUS; this.perfectFx = 0.6; this.stats.perfect++;
+          this.texts.push({ x: u.x, y: this.unitY(u) - u.def.height - 34, text: '✦ ×1.6', life: 0.8, color: '#7df9ff', size: 17 });
+          this.ev.onPerfect?.();
+        }
         if (def.ranged) { if (foe) this.shoot(u, foe, dmgMult); else if (Math.abs(enemyCastle - u.x) < range + 50) this.shootCastle(u, foeSide, dmgMult); }
         else if (foe) this.hit(u, foe, dmgMult);
         else if (Math.abs(enemyCastle - u.x) < range + 50) this.hitCastle(u, foeSide, dmgMult);
@@ -879,7 +1055,13 @@ export class Battle {
   /** Every outgoing-damage modifier in one place. */
   private outMult(u: Unit, target?: UnitDef) {
     let m = target && u.def.bonusVs?.includes(target.id) ? COUNTER_BONUS : 1;
-    if (u.side === 0) { m *= this.cards.dmg; if (this.buff > 0) m *= 1.25; }
+    if (u.side === 0) {
+      m *= this.cards.dmg; if (this.buff > 0) m *= 1.25;
+      if (!u.def.ranged) { if (this.formation === 'wedge') m *= 1.1; else if (this.formation === 'skirmish') m *= 0.9; }
+    }
+    const bond = this.bondOf(u);
+    if (bond === 'volley' || bond === 'charge') m *= 1.06;
+    else if (bond === 'brothers') m *= 1.05;
     if (u.side === 1 && this.debuff > 0) m *= 0.7;
     for (const h of this.auras) if (h.side === u.side && h !== u && Math.abs(h.x - u.x) < 150) { m *= 1 + h.def.aura!; break; }
     return m;
@@ -1025,6 +1207,7 @@ export class Battle {
       this.texts.push({ x: o.x, y: this.unitY(o) - o.def.height - 8, text: '~', life: 0.5, color: '#fff' });
       return;
     }
+    dmg *= this.takenMult(o);
     const dealt = Math.min(o.hp, dmg);
     o.hp -= dmg;
     o.hitFlash = 0.12;
@@ -1077,6 +1260,15 @@ export class Battle {
         for (const v of this.units) if (v.side !== o.side && !v.dead && Math.abs(v.x - o.x) < e.radius && !v.def.flying) this.applyDamage(v, e.dmg * (o.side === 1 ? this.enemyStat : 1), true);
       }
     }
+  }
+
+  /** Incoming-damage modifiers: formations and defensive bonds. */
+  private takenMult(o: Unit) {
+    let m = 1;
+    if (o.side === 0 && !o.def.miner) { if (this.formation === 'wall') m *= 0.8; else if (this.formation === 'wedge') m *= 1.1; }
+    const bond = this.bondOf(o);
+    if (bond === 'phalanx') m *= 0.9;
+    return m;
   }
 
   /** Floating damage numbers; rapid hits on the same unit merge into one. */

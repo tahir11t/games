@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Dev tool: every unit drawn with the procedural art (npm run dev, then open /art-gallery.html).
+     Query params: ids=sword,archer  cols=10  zoom=2  tier=0..4  side=0|1  move=1  atk=0..1  region=dunes --><html><head><meta charset="utf-8"><title>Art gallery</title><style>body{margin:0;background:#e8d3a6}canvas{display:block}</style></head>
+<body><canvas id="c"></canvas><script type="module">
+import { drawArt } from '/src/game/art.ts';
+import { UNITS } from '/src/data/units.ts';
+const q = new URLSearchParams(location.search);
+const ids = (q.get('ids') ?? Object.keys(UNITS).join(',')).split(',');
+const tier = Number(q.get('tier') ?? 0), side = Number(q.get('side') ?? 0), mov = q.get('move') === '1', atk = Number(q.get('atk') ?? 0);
+const Z = Number(q.get('zoom') ?? 1); const cols = Number(q.get('cols') ?? 10), cw = 150 * Z, ch = 190 * Z;
+const cv = document.getElementById('c'); cv.width = cols * cw; cv.height = Math.ceil(ids.length / cols) * ch;
+const c = cv.getContext('2d');
+ids.forEach((id, i) => {
+  const def = UNITS[id]; const x = (i % cols) * cw + cw / 2, gy = Math.floor(i / cols) * ch + ch - 26;
+  const s = Math.min(1, 150 / def.height) * Z;
+  c.save(); c.translate(x, gy); c.scale(s, s); c.translate(-x, -gy);
+  const u = { uid: i, def, side, x, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.1, moving: mov, attacking: atk, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier };
+  const fy = def.flying ? gy - 40 : gy; c.save(); c.translate(x, gy); c.scale(1/s,1/s); c.translate(-x,-gy);
+  c.fillStyle = 'rgba(0,0,0,.15)'; c.beginPath(); c.ellipse(x, gy + 2, 30*Z, 6*Z, 0, 0, 7); c.fill(); c.restore();
+  drawArt({ c, u, x, gy: fy, f: side ? -1 : 1, t: 1.3, swing: mov ? 0.5 : 0, atk, side, region: q.get('region') ?? 'dunes', flash: false, tier });
+  c.restore();
+  c.fillStyle = '#3a2410'; c.font = '11px sans-serif'; c.textAlign = 'center'; c.fillText(id, x, gy + 18*Z);
+});
+document.title = 'ready';
+</script></body></html>

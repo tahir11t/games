@@ -1,6 +1,31 @@
 import { TR } from './i18n-tr';
+import { FR } from './i18n-fr';
+import { ES } from './i18n-es';
+import { ID } from './i18n-id';
+import { FA } from './i18n-fa';
+import { UR } from './i18n-ur';
 
-export type Lang = 'ar' | 'en' | 'tr';
+export type Lang = 'ar' | 'en' | 'tr' | 'fr' | 'es' | 'id' | 'fa' | 'ur';
+/** Every supported language: native name, writing direction and number locale. */
+export const LANGS: { id: Lang; name: string; rtl: boolean; locale: string }[] = [
+  { id: 'ar', name: 'العربية', rtl: true, locale: 'ar-EG' },
+  { id: 'en', name: 'English', rtl: false, locale: 'en-US' },
+  { id: 'fr', name: 'Français', rtl: false, locale: 'fr-FR' },
+  { id: 'es', name: 'Español', rtl: false, locale: 'es-ES' },
+  { id: 'tr', name: 'Türkçe', rtl: false, locale: 'tr-TR' },
+  { id: 'id', name: 'Bahasa Indonesia', rtl: false, locale: 'id-ID' },
+  { id: 'fa', name: 'فارسی', rtl: true, locale: 'fa-IR' },
+  { id: 'ur', name: 'اردو', rtl: true, locale: 'ur-PK' },
+];
+/** Translations for languages beyond Arabic/English. Missing keys fall back to English. */
+const EXTRA: Partial<Record<Lang, Record<string, string>>> = { tr: TR, fr: FR, es: ES, id: ID, fa: FA, ur: UR };
+/** Picks the first supported language from the browser's preferences. */
+export function detectLang(): Lang {
+  const prefs = [...(navigator.languages ?? []), navigator.language].filter(Boolean).map((l) => l.toLowerCase());
+  for (const p of prefs) { const hit = LANGS.find((l) => p === l.id || p.startsWith(l.id + '-')); if (hit) return hit.id; }
+  if (prefs.some((p) => p.startsWith('in'))) return 'id'; // legacy code for Indonesian
+  return 'en';
+}
 
 const S = {
   title: { ar: 'حرب الرمال', en: 'Sand Wars' },
@@ -88,7 +113,7 @@ const S = {
   challenges: { ar: 'تحديات الوحوش', en: 'Monster Challenges' },
   survival: { ar: 'النجاة', en: 'Survival' },
   dailyCh: { ar: 'تحدي اليوم', en: 'Daily Challenge' },
-  campaignDesc: { ar: '50 مستوى في 5 مناطق', en: '50 levels across 5 regions' },
+  campaignDesc: { ar: '70 مستوى في 7 مناطق', en: '70 levels across 7 regions' },
   challengesDesc: { ar: 'اهزم وحوشاً قوية لتفتح أقوى الجنود والمهارات', en: 'Beat mighty monsters to unlock elite units and skills' },
   survivalDesc: { ar: 'موجات لا تنتهي — كم ستصمد؟', en: 'Endless waves — how long can you hold?' },
   dailyDesc: { ar: 'قاعدة خاصة كل يوم', en: 'A special rule every day' },
@@ -413,17 +438,91 @@ const S = {
   achd_raider: { ar: 'أسقط 10 عمّال عدو في معركة واحدة', en: 'Stop 10 enemy miners in one battle' },
   achd_legend: { ar: 'طوّر جندياً إلى المستوى 20', en: 'Upgrade a unit to level 20' },
   achd_campaign: { ar: 'أنهِ المستوى 50', en: 'Finish level 50' },
+  // ---- v1.0 ----
+  u_bandit: { ar: 'قاطع طريق', en: 'Bandit' },
+  u_sandmage: { ar: 'ساحر الرمال', en: 'Sand Mage' },
+  u_golem: { ar: 'غولم حجري', en: 'Stone Golem' },
+  u_ghost: { ar: 'شبح', en: 'Ghost' },
+  u_mummy: { ar: 'مومياء', en: 'Mummy' },
+  u_skeleton: { ar: 'هيكل عظمي', en: 'Skeleton' },
+  u_cobra: { ar: 'كوبرا', en: 'Cobra' },
+  u_hyena: { ar: 'ضبع', en: 'Hyena' },
+  u_vulture: { ar: 'نسر', en: 'Vulture' },
+  perfect: { ar: 'ضربة مثالية!', en: 'Perfect strike!' },
+  lastStand: { ar: 'الحصن يصمد! موجة صادمة', en: 'Last Stand! The fort strikes back' },
+  well: { ar: 'بئر الواحة', en: 'Oasis Well' },
+  wellOurs: { ar: 'سيطرت على بئر الواحة!', en: 'You hold the Oasis Well!' },
+  wellLost: { ar: 'العدو استولى على البئر', en: 'The enemy took the Well' },
+  formation: { ar: 'التشكيل', en: 'Formation' },
+  f_line: { ar: 'صف متوازن', en: 'Line' },
+  f_wedge: { ar: 'رأس الحربة', en: 'Wedge' },
+  f_wall: { ar: 'جدار الدروع', en: 'Shield Wall' },
+  f_skirmish: { ar: 'مناوشة', en: 'Skirmish' },
+  fmd_line: { ar: 'بلا تعديلات', en: 'No modifiers' },
+  fmd_wedge: { ar: 'المشاة: +12% سرعة و+10% ضرر، لكن +10% ضرر مُتلقّى', en: 'Melee: +12% speed, +10% damage, but take 10% more' },
+  fmd_wall: { ar: 'ضرر مُتلقّى −20%، والمشاة أبطأ 18%', en: 'Take 20% less damage; melee 18% slower' },
+  fmd_skirmish: { ar: 'مدى الرماة +15%، وضرر المشاة −10%', en: 'Ranged +15% range; melee −10% damage' },
+  bonds: { ar: 'الروابط', en: 'Bonds' },
+  bond_volley: { ar: 'رابطة الرماة', en: 'Archer Bond' },
+  bond_phalanx: { ar: 'الكتيبة', en: 'Phalanx' },
+  bond_charge: { ar: 'رابطة الفرسان', en: 'Riders’ Bond' },
+  bond_brothers: { ar: 'إخوة السيف', en: 'Sword Brothers' },
+  bondd_volley: { ar: '4 رماة أو أكثر: +6% ضرر للرماة', en: '4+ archers: archers deal +6% damage' },
+  bondd_phalanx: { ar: '3 رماحين أو أكثر: يتلقّون ضرراً أقل 10%', en: '3+ spearmen: they take 10% less damage' },
+  bondd_charge: { ar: 'فارسان أو أكثر (جِمال، خيول، أسود): +6% سرعة وضرر', en: '2+ riders (camels, horses, lions): +6% speed and damage' },
+  bondd_brothers: { ar: '6 سيّافين أو أكثر: +5% ضرر', en: '6+ swordsmen: +5% damage' },
+  autoOn: { ar: 'تدريب تلقائي: يعمل ↻', en: 'Auto-train: on ↻' },
+  autoOff: { ar: 'تدريب تلقائي: متوقف', en: 'Auto-train: off' },
+  autoHint: { ar: 'اضغط مطوّلاً ثانية لتفعيل التدريب التلقائي ↻', en: 'Hold 1 s to toggle auto-train ↻' },
+  scout: { ar: 'تقرير الكشّافة', en: 'Scout report' },
+  scoutFace: { ar: 'ستواجه', en: 'You will face' },
+  counterWith: { ar: 'يُنصح بـ', en: 'Counter with' },
+  codex: { ar: 'الموسوعة', en: 'Codex' },
+  discovered: { ar: 'مُكتشَف', en: 'Discovered' },
+  unknownUnit: { ar: 'مجهول: قابله في المعركة لكشفه', en: 'Unknown: meet it in battle to reveal it' },
+  strongVs: { ar: 'قوي ضد', en: 'Strong vs' },
+  tagFlying: { ar: 'طائر', en: 'Flying' },
+  tagRanged: { ar: 'بعيد المدى', en: 'Ranged' },
+  tagSplash: { ar: 'ضرر منطقة', en: 'Area damage' },
+  range: { ar: 'المدى', en: 'Range' },
+  speedStat: { ar: 'السرعة', en: 'Speed' },
+  myUnits: { ar: 'جنودي', en: 'My units' },
+  enemies: { ar: 'الأعداء', en: 'Enemies' },
+  mechanics: { ar: 'آليات المعركة', en: 'Battle mechanics' },
+  help_well: { ar: 'بئر الواحة في منتصف الساحة: الجيش الأكثر حوله يستولي عليه، فيكسب ذهباً ويشفي جنوده القريبين.', en: 'The Oasis Well sits mid-field: the army with more troops around it takes it, earning gold and healing nearby soldiers.' },
+  help_drops: { ar: 'صناديق الإمداد تهبط بالمظلات: أول مقاتل يلمسها يأخذها (ذهب، شحن القدرة، أو شفاء).', en: 'Supply crates parachute in: the first fighter to touch one claims it (gold, ability charge or healing).' },
+  help_last: { ar: 'الصمود الأخير: حين ينزل حصنك تحت 25% يطلق موجة صادمة مرة واحدة تدفع الأعداء وتشلّهم.', en: 'Last Stand: when your fort drops below 25% it fires one shockwave that throws back and stuns attackers.' },
+  help_perfect: { ar: 'الضربة المثالية: عند التحكّم بجندي، اضغط ⚔ لحظة توهّج الحلقة الزرقاء لضرر ×1.6.', en: 'Perfect strike: while controlling a soldier, tap ⚔ as the ring glows cyan for ×1.6 damage.' },
+  help_bonds: { ar: 'الروابط القبلية: عدة جنود من النوع نفسه يمنحون ذلك النوع مكافأة، وللعدو روابطه أيضاً.', en: 'Tribal bonds: several units of one kind give that kind a bonus. The enemy gets bonds too.' },
+  help_formation: { ar: 'التشكيلات: بدّل تشكيل جيشك أثناء المعركة؛ لكل تشكيل ميزة وثمن.', en: 'Formations: switch your army’s formation mid-battle; each one has an upside and a cost.' },
+  share: { ar: 'شارك', en: 'Share' },
+  shareText: { ar: 'انتصرتُ في حرب الرمال! هل تستطيع التفوق عليّ؟', en: 'I won in Sand Wars! Can you beat me?' },
+  imageSaved: { ar: 'تم حفظ الصورة', en: 'Image saved' },
+  vibrate: { ar: 'الاهتزاز', en: 'Vibration' },
+  st_perfect: { ar: 'ضربات مثالية', en: 'Perfect strikes' },
+  st_drops: { ar: 'صناديق مأخوذة', en: 'Crates claimed' },
+  st_well: { ar: 'ثوانٍ على البئر', en: 'Seconds at the Well' },
 } as const;
 
 export type Key = keyof typeof S;
 
 let lang: Lang = 'ar';
 export const getLang = () => lang;
+export const isRtl = (l: Lang = lang) => LANGS.find((x) => x.id === l)?.rtl ?? false;
 export function setLang(l: Lang) {
-  lang = l;
-  document.documentElement.lang = l;
-  document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
+  lang = LANGS.some((x) => x.id === l) ? l : 'en';
+  document.documentElement.lang = lang;
+  document.documentElement.dir = isRtl() ? 'rtl' : 'ltr';
 }
-export const t = (k: Key): string => (lang === 'tr' ? TR[k] ?? S[k].en : S[k][lang]);
+export const t = (k: Key): string => (lang === 'ar' || lang === 'en' ? S[k][lang] : EXTRA[lang]?.[k] ?? S[k].en);
 export const tk = (k: string): string => (k in S ? t(k as Key) : k);
-export const num = (n: number) => n.toLocaleString(lang === 'ar' ? 'ar-EG' : lang === 'tr' ? 'tr-TR' : 'en-US');
+const fmt = new Map<string, Intl.NumberFormat>();
+export const num = (n: number) => {
+  const loc = LANGS.find((x) => x.id === lang)?.locale ?? 'en-US';
+  let f = fmt.get(loc);
+  if (!f) { f = new Intl.NumberFormat(loc); fmt.set(loc, f); }
+  return f.format(n);
+};
+/** All keys with their English text (used by the translation check script). */
+export const KEYS = Object.keys(S) as Key[];
+export const english = (k: Key) => S[k].en;

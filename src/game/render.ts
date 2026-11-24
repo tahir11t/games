@@ -1,4 +1,5 @@
-import { Battle, W, H, GROUND, CASTLE_X, MINE_X, type Unit } from './battle';
+import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, type Unit, type SupplyDrop } from './battle';
+const LAST_STAND_VIS = 420;
 import type { RegionId } from '../data/levels';
 import { drawArt, glowDot, isLowQuality, shade as shadeHex } from './art';
 import { UNITS, type EnemyId } from '../data/units';
@@ -62,6 +63,7 @@ export class Renderer {
     const time = (performance.now() - this.t0) / 1000;
     const low = isLowQuality();
     TEAM = ['#e0a82e', b.level.enemyColor ?? '#9e1f1f'];
+    c.direction = 'ltr'; // numbers like "-20" must not flip on RTL pages
     c.setTransform(1, 0, 0, 1, 0, 0);
     const sk = c.createLinearGradient(0, 0, 0, this.canvas.height * 0.75);
     sk.addColorStop(0, th.sky[0]); sk.addColorStop(0.55, th.sky[1]); sk.addColorStop(1, th.sky[2]);
@@ -106,6 +108,9 @@ export class Renderer {
       c.fillStyle = 'rgba(224,168,46,.85)'; c.beginPath(); c.moveTo(markX, GROUND - 46); c.lineTo(markX + 22 + Math.sin(time * 4) * 3, GROUND - 40); c.lineTo(markX, GROUND - 32); c.closePath(); c.fill();
     }
 
+    this.drawWell(b, time);
+    for (const d of b.drops) this.drawDrop(d, time);
+
     this.lastControlled = b.controlled;
     const sorted = [...b.units].sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || a.lane - z.lane);
     for (const u of sorted) if (!u.hidden) this.drawUnit(u, b);
@@ -115,6 +120,12 @@ export class Renderer {
       if (e.kind === 'pillar') {
         const g = c.createLinearGradient(e.x - 30, 0, e.x + 30, 0); g.addColorStop(0, 'rgba(255,230,120,0)'); g.addColorStop(0.5, `rgba(255,240,170,${0.8 * k})`); g.addColorStop(1, 'rgba(255,230,120,0)');
         c.fillStyle = g; c.fillRect(e.x - 30, 0, 60, GROUND); continue;
+      }
+      if (e.kind === 'shock') { // the fort's last stand: a sand shockwave rolling outward
+        const r = (1 - k) * LAST_STAND_VIS + 20;
+        c.strokeStyle = `rgba(255,236,170,${k})`; c.lineWidth = 10 * k + 2; c.beginPath(); c.ellipse(e.x, e.y - 4, r, r * 0.16, 0, Math.PI * 1.02, Math.PI * 1.98); c.stroke();
+        c.fillStyle = `rgba(214,170,100,${0.35 * k})`; c.beginPath(); c.ellipse(e.x + r * 0.5, e.y - 18, r * 0.55, 40 * k + 6, 0, 0, 7); c.fill();
+        continue;
       }
       if (e.kind === 'ring') { c.strokeStyle = `rgba(255,230,140,${k})`; c.lineWidth = 4 * k + 1; c.beginPath(); c.ellipse(e.x, e.y, (1 - k) * 200 + 10, ((1 - k) * 200 + 10) * 0.22, 0, 0, 7); c.stroke(); continue; }
       if (e.kind === 'slash') {
@@ -650,6 +661,66 @@ export class Renderer {
     c.beginPath(); c.roundRect(x - bw / 2, G - 337, bw * Math.max(0, pct), 10, 4); c.fill();
   }
 
+  /** The Oasis Well: palms, a stone well and a banner showing who holds it, with a capture ring. */
+  private drawWell(b: Battle, time: number) {
+    const c = this.ctx, x = WELL_X, G = GROUND;
+    const w = b.well;
+    // capture ring on the ground
+    c.save();
+    c.setLineDash([6, 6]); c.strokeStyle = 'rgba(255,255,255,.28)'; c.lineWidth = 2; c.beginPath(); c.ellipse(x, G + 4, WELL_R, WELL_R * 0.16, 0, 0, 7); c.stroke(); c.setLineDash([]);
+    if (Math.abs(w.progress) > 0.01) {
+      const col = w.progress > 0 ? '#ffd34d' : (b.level.enemyColor ?? '#ff5a4a');
+      c.strokeStyle = col; c.globalAlpha = 0.85; c.lineWidth = 4;
+      c.beginPath(); c.ellipse(x, G + 4, WELL_R, WELL_R * 0.16, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(w.progress)); c.stroke();
+    }
+    c.restore();
+    // a small palm on each side
+    for (const dx of [-70, 64]) {
+      const px = x + dx, sway = Math.sin(time * 1.2 + dx) * 3;
+      c.strokeStyle = '#7a5530'; c.lineWidth = 5; c.lineCap = 'round'; c.beginPath(); c.moveTo(px, G - 6); c.quadraticCurveTo(px + dx * 0.05, G - 50, px + sway, G - 84); c.stroke();
+      for (let i = 0; i < 6; i++) { const an = -Math.PI / 2 + (i - 2.5) * 0.55; c.strokeStyle = i % 2 ? '#3f8f3a' : '#2f7a33'; c.lineWidth = 4; c.beginPath(); c.moveTo(px + sway, G - 84); c.quadraticCurveTo(px + sway + Math.cos(an) * 22, G - 84 + Math.sin(an) * 22 - 8, px + sway + Math.cos(an) * 38, G - 84 + Math.sin(an) * 18 + 10); c.stroke(); }
+    }
+    // stone well
+    c.fillStyle = '#5a7fa0'; c.beginPath(); c.ellipse(x, G - 30, 26, 7, 0, 0, 7); c.fill();
+    if (!isLowQuality()) { c.fillStyle = `rgba(200,240,255,${0.5 + Math.sin(time * 3) * 0.2})`; c.beginPath(); c.ellipse(x - 6 + Math.sin(time) * 4, G - 31, 6, 1.6, 0, 0, 7); c.fill(); }
+    const sg = c.createLinearGradient(x - 30, 0, x + 30, 0); sg.addColorStop(0, '#8a7a62'); sg.addColorStop(0.6, '#c9b590'); sg.addColorStop(1, '#a8957a');
+    c.fillStyle = sg; c.strokeStyle = '#4a3a28'; c.lineWidth = 1.6;
+    c.beginPath(); c.moveTo(x - 30, G - 30); c.lineTo(x - 30, G - 4); c.ellipse(x, G - 4, 30, 8, 0, Math.PI, 0, true); c.lineTo(x + 30, G - 30); c.ellipse(x, G - 30, 30, 8, 0, 0, Math.PI); c.closePath(); c.fill(); c.stroke();
+    c.strokeStyle = 'rgba(60,45,30,.45)'; c.lineWidth = 1; for (let r = 0; r < 3; r++) for (let k = 0; k < 5; k++) { const bx = x - 26 + k * 13 + (r % 2) * 6, by = G - 25 + r * 8; c.strokeRect(bx, by, 11, 7); }
+    // wooden frame, roof and bucket
+    c.strokeStyle = '#6b4423'; c.lineWidth = 4; c.beginPath(); c.moveTo(x - 24, G - 30); c.lineTo(x - 24, G - 70); c.moveTo(x + 24, G - 30); c.lineTo(x + 24, G - 70); c.moveTo(x - 26, G - 64); c.lineTo(x + 26, G - 64); c.stroke();
+    c.fillStyle = '#a0672f'; c.strokeStyle = '#4a2c14'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x - 34, G - 68); c.lineTo(x, G - 88); c.lineTo(x + 34, G - 68); c.closePath(); c.fill(); c.stroke();
+    const by = G - 52 + Math.sin(time * 2) * 3;
+    c.strokeStyle = '#3a2a1a'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, G - 64); c.lineTo(x, by); c.stroke();
+    c.fillStyle = '#7a5530'; c.beginPath(); c.roundRect(x - 5, by, 10, 9, 2); c.fill();
+    // owner banner
+    const col = w.owner === 0 ? '#ffd34d' : w.owner === 1 ? (b.level.enemyColor ?? '#c8323c') : '#e8e0d0';
+    c.strokeStyle = '#3a2a1a'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(x, G - 88); c.lineTo(x, G - 122); c.stroke();
+    c.fillStyle = col; c.beginPath(); c.moveTo(x, G - 122); c.quadraticCurveTo(x + 14, G - 120 + Math.sin(time * 5) * 2, x + 28 + Math.sin(time * 4) * 3, G - 116); c.lineTo(x, G - 106); c.closePath(); c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1; c.stroke();
+    if (w.owner !== -1 && !isLowQuality()) glowDot(c, x, G - 30, 4 + Math.sin(time * 4), w.owner === 0 ? '#7dff9a' : '#ff9a7d');
+  }
+
+  /** A supply crate under a parachute; it glows once landed. */
+  private drawDrop(d: SupplyDrop, time: number) {
+    const c = this.ctx;
+    const icon = d.kind === 'gold' ? '🪙' : d.kind === 'charge' ? '⚡' : '✚';
+    if (!d.landed) { // parachute and lines
+      const sway = Math.sin(time * 2 + d.x) * 6;
+      c.save(); c.translate(d.x + sway, d.y - 44); c.rotate(sway * 0.02);
+      c.fillStyle = '#f2ead8'; c.strokeStyle = '#6b4a2a'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(-26, 0); c.quadraticCurveTo(0, -36, 26, 0); c.quadraticCurveTo(13, -6, 0, 0); c.quadraticCurveTo(-13, -6, -26, 0); c.fill(); c.stroke();
+      c.fillStyle = '#c8323c'; c.beginPath(); c.moveTo(-9, -20); c.quadraticCurveTo(0, -26, 9, -20); c.lineTo(5, -2); c.lineTo(-5, -2); c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(60,40,20,.7)'; c.lineWidth = 1; c.beginPath(); c.moveTo(-26, 0); c.lineTo(-sway * 0.2, 38); c.moveTo(26, 0); c.lineTo(-sway * 0.2, 38); c.moveTo(0, 0); c.lineTo(-sway * 0.2, 38); c.stroke();
+      c.restore();
+    } else if (!isLowQuality()) {
+      c.save(); c.globalAlpha = 0.35 + Math.sin(time * 5) * 0.15; c.fillStyle = '#fff3b0'; c.beginPath(); c.ellipse(d.x, GROUND - 2, 26, 6, 0, 0, 7); c.fill(); c.restore();
+    }
+    const blink = d.landed && d.life < 6 && Math.sin(time * 14) > 0;
+    if (blink) return;
+    c.fillStyle = '#a0672f'; c.strokeStyle = '#4a2c14'; c.lineWidth = 1.6; c.beginPath(); c.roundRect(d.x - 12, d.y - 14, 24, 22, 3); c.fill(); c.stroke();
+    c.strokeStyle = '#6b4423'; c.beginPath(); c.moveTo(d.x - 12, d.y - 3); c.lineTo(d.x + 12, d.y - 3); c.moveTo(d.x - 12, d.y - 14); c.lineTo(d.x + 12, d.y + 8); c.stroke();
+    c.font = '14px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText(icon, d.x, d.y - 18);
+  }
+
   drawUnit(u: Unit, b: Battle) {
     const c = this.ctx;
     const f = u.side === 0 ? 1 : -1;
@@ -669,6 +740,14 @@ export class Renderer {
       c.fillStyle = '#ffe066';
       const my = gy - u.def.height - 30 + Math.sin(performance.now() / 150) * 4;
       c.beginPath(); c.moveTo(u.x, my + 12); c.lineTo(u.x - 9, my); c.lineTo(u.x + 9, my); c.closePath(); c.fill();
+      // Perfect Strike timing ring: it closes as the weapon readies and flashes cyan in the perfect window
+      const cdMax = u.def.cooldown * 0.85;
+      const ready = Math.max(0, Math.min(1, 1 - u.cd / cdMax));
+      const inWindow = u.cd <= 0.12 && u.cd > -0.3;
+      const ry = gy - u.def.height * 0.5;
+      c.lineWidth = 3; c.strokeStyle = inWindow ? '#7df9ff' : 'rgba(255,255,255,.35)';
+      c.beginPath(); c.arc(u.x, ry, u.def.height * 0.62 + (1 - ready) * 18, 0, Math.PI * 2 * (inWindow ? 1 : ready)); c.stroke();
+      if (b.perfectFx > 0) { c.strokeStyle = `rgba(125,249,255,${b.perfectFx * 1.6})`; c.lineWidth = 5; c.beginPath(); c.arc(u.x, ry, u.def.height * 0.62 + (0.6 - b.perfectFx) * 60, 0, 7); c.stroke(); }
     }
     if (u.dead) {
       c.globalAlpha = Math.max(0, 1 - u.dead / 1.2);

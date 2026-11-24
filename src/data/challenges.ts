@@ -96,7 +96,7 @@ export const CHALLENGES: ChallengeDef[] = [
 export const challengeById = (id: string) => CHALLENGES.find((c) => c.id === id)!;
 
 /** Per-challenge strength factors from scripts/challenges.ts --tune (1 = untuned). */
-export const CH_TUNE: Partial<Record<ChallengeId, number>> = { hyenas: 1.23, archery: 1.14, siege: 1.21, scorpion: 0.46, roc: 0.31, worm: 0.4, titan: 0.41, stampede: 0.27, djinn: 0.21, warlord: 0.22, cobra: 0.29, phoenix: 0.2 };
+export const CH_TUNE: Partial<Record<ChallengeId, number>> = { hyenas: 1.23, archery: 1.14, siege: 1.3, scorpion: 0.46, roc: 0.31, worm: 0.4, titan: 0.41, stampede: 0.28, djinn: 0.21, warlord: 0.22, cobra: 0.29, phoenix: 0.2 };
 
 export function challengeLevel(c: ChallengeDef, tune = CH_TUNE[c.id] ?? 1): LevelDef {
   return {

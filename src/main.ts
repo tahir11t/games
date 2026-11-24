@@ -1,5 +1,5 @@
 import './style.css';
-import { t, tk, setLang, getLang, num, type Key } from './i18n';
+import { t, tk, setLang, num, isRtl, LANGS, type Key, type Lang } from './i18n';
 import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents } from './save';
 import { UNITS, PLAYER_UNITS, BASE_UNITS, MAX_UNIT_LEVEL, upgradeCost, upgradeMult, type UnitId } from './data/units';
 import { LEVELS, REGIONS, type RegionId, type LevelDef } from './data/levels';
@@ -12,8 +12,8 @@ import { FACTIONS, CONQUEST_BATTLES, HERO_BATTLE, SIEGE_BATTLE, ELITE_BATTLE, co
 import { PREMIUM_UNITS, type EnemyId } from './data/units';
 import { PRODUCTS, SUB_PLANS, TEST_MODE, type Product } from './store';
 import { TOWER_FLOORS, towerLevel, towerRule } from './data/challenges';
-import { DIFFICULTY, tierOf, MAX_TOWER_ARCHERS, type Difficulty } from './game/battle';
-import { setLowQuality } from './game/art';
+import { DIFFICULTY, tierOf, MAX_TOWER_ARCHERS, FORMATIONS, BONDS, type Difficulty, type BondId } from './game/battle';
+import { setLowQuality, drawArt } from './game/art';
 import { LEVEL_COUNT } from './data/levels';
 
 const ui = document.getElementById('ui')!;
@@ -88,7 +88,7 @@ function applySettings() {
 
 function topbar(back = true) {
   return `<div class="topbar">
-    ${back ? `<button class="btn secondary small" data-act="back">${getLang() === 'ar' ? '→' : '←'} ${t('back')}</button>` : ''}
+    ${back ? `<button class="btn secondary small" data-act="back">${isRtl() ? '→' : '←'} ${t('back')}</button>` : ''}
     <div class="grow"></div>
     <span class="chip"><span class="ico">⭐</span>${num(totalStars())}</span>
     <span class="chip gold-chip"><span class="ico">🪙</span>${num(save.gold)}</span>
@@ -138,6 +138,17 @@ const ACH: { id: string; icon: string; gems: number }[] = [
   { id: 'survivor', icon: '♾️', gems: 25 }, { id: 'hunter', icon: '🐲', gems: 40 }, { id: 'raider', icon: '⛏️', gems: 20 },
   { id: 'legend', icon: '💠', gems: 30 }, { id: 'campaign', icon: '🏆', gems: 100 }, { id: 'conqueror', icon: '🌍', gems: 150 },
 ];
+/** Short vibration on supported phones (Settings → Vibration). */
+function buzz(pattern: number | number[]) { try { if (save.vibrate && 'vibrate' in navigator) navigator.vibrate(pattern); } catch { /* not supported */ } }
+/** A brief banner across the battlefield. */
+function bannerMsg(html: string, cls = '') {
+  // banners that fire together stack downward instead of overlapping
+  const live = ui.querySelectorAll('.boss-banner').length;
+  const el = h(`<div class="boss-banner ${cls}" style="top:${22 + Math.min(3, live) * 12}%">${html}</div>`);
+  ui.appendChild(el);
+  setTimeout(() => el.remove(), 3100);
+}
+
 function toast(html: string) {
   const el = h(`<div class="toast">${html}</div>`);
   document.getElementById('app')!.appendChild(el);
@@ -181,6 +192,100 @@ function showAchievements() {
   mount(el);
 }
 
+// ---------------- Codex: every unit with live art, stats and counters ----------------
+const ALL_ENEMIES = (Object.keys(UNITS) as EnemyId[]).filter((id) => !(PLAYER_UNITS as EnemyId[]).includes(id));
+const enemyIcons = new Map<string, string>();
+const enemyIcon = (id: EnemyId) => { let s2 = enemyIcons.get(id); if (!s2) { s2 = Renderer.icon(UNITS[id], 96, 1); enemyIcons.set(id, s2); } return s2; };
+/** Display names for monsters that are named after their challenge or region. */
+const NAME_ALIAS: Partial<Record<EnemyId, string>> = { boss: 'b_oasis', scorpking: 'ch_scorpion', roc: 'ch_roc', worm: 'ch_worm', titan: 'ch_titan', djinn: 'ch_djinn', warlord: 'ch_warlord', mummyking: 'b_tombs', cobraqueen: 'ch_cobra', phoenix: 'ch_phoenix' };
+const unitName = (id: EnemyId) => (tk('u_' + id) !== 'u_' + id ? tk('u_' + id) : NAME_ALIAS[id] ? tk(NAME_ALIAS[id]!) : id);
+/** Player units that deal bonus damage to `id` (the counter triangle). */
+function countersOf(id: EnemyId): UnitId[] {
+  const d = UNITS[id];
+  const out = PLAYER_UNITS.filter((p) => UNITS[p].bonusVs?.includes(id));
+  if (d.flying) for (const p of ['archer', 'crossbow', 'falcon'] as UnitId[]) if (!out.includes(p)) out.push(p);
+  if (!out.length && (d.ranged || d.id === 'sandmage')) out.push('camel', 'assassin');
+  if (!out.length && d.hp >= 1000) out.push('catapult', 'spear');
+  return out.slice(0, 3);
+}
+let codexTab: 'mine' | 'enemies' | 'help' = 'mine';
+function showCodex() {
+  const mine = PLAYER_UNITS;
+  const seen = new Set(save.seen);
+  const tags = (id: EnemyId) => { const d = UNITS[id]; return [d.flying && `🪽 ${t('tagFlying')}`, d.ranged && `🏹 ${t('tagRanged')}`, d.splash && `💥 ${t('tagSplash')}`, d.heal && '✚'].filter(Boolean).join(' · '); };
+  const card = (id: EnemyId, side: 0 | 1) => {
+    const known = side === 0 || seen.has(id);
+    return `<button class="codex-card ${known ? '' : 'unknown'}" data-cx="${id}" data-side="${side}" ${known ? '' : 'disabled'}>
+      <img src="${side === 0 ? iconFor(id as UnitId) : enemyIcon(id)}" alt="">
+      <b>${known ? unitName(id) : '???'}</b>
+    </button>`;
+  };
+  const found = ALL_ENEMIES.filter((id) => seen.has(id)).length;
+  const help = (['well', 'drops', 'last', 'perfect', 'bonds', 'formation'] as const).map((k, i) => `<div class="help-row"><span>${['🌴', '📦', '🏰', '✦', '🤝', '🔺'][i]}</span><p>${t(('help_' + k) as Key)}</p></div>`).join('')
+    + `<div class="help-row"><span>🤝</span><p>${(Object.keys(BONDS) as BondId[]).map((b) => `${BONDS[b].icon} <b>${t(('bond_' + b) as Key)}</b>: ${t(('bondd_' + b) as Key)}`).join('<br>')}</p></div>`;
+  const el = h(`<div class="screen">${topbar()}
+    <div class="tabs" style="margin-top:8px">
+      <button class="tab ${codexTab === 'mine' ? 'on' : ''}" data-tab="mine">🛡️ ${t('myUnits')}</button>
+      <button class="tab ${codexTab === 'enemies' ? 'on' : ''}" data-tab="enemies">💀 ${t('enemies')} <small>${num(found)}/${num(ALL_ENEMIES.length)}</small></button>
+      <button class="tab ${codexTab === 'help' ? 'on' : ''}" data-tab="help">📜 ${t('mechanics')}</button>
+    </div>
+    ${codexTab === 'help' ? `<div class="panel help-box">${help}</div>` : `<div class="codex-grid">${(codexTab === 'mine' ? mine.map((id) => card(id, 0)) : ALL_ENEMIES.map((id) => card(id, 1))).join('')}</div>`}
+  </div>`);
+  el.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => { sfx('click'); codexTab = b.dataset.tab as typeof codexTab; showCodex(); }));
+  el.querySelectorAll<HTMLElement>('[data-cx]').forEach((b) => b.addEventListener('click', () => { sfx('click'); codexDetail(b.dataset.cx as EnemyId, Number(b.dataset.side) as 0 | 1, tags); }));
+  mount(el);
+}
+/** Detail card with the unit animating through its walk and attack cycle. */
+function codexDetail(id: EnemyId, side: 0 | 1, tags: (id: EnemyId) => string) {
+  const d = UNITS[id];
+  const lvl = side === 0 ? save.unitLevels[id as UnitId] ?? 1 : 1;
+  const m = side === 0 ? upgradeMult(lvl) : 1;
+  const counters = side === 1 ? countersOf(id) : [];
+  const strong = (d.bonusVs ?? []).filter((x) => x in UNITS);
+  const ov = h(`<div class="screen dim codex-ov" style="z-index:30"><div class="panel codex-detail">
+    <canvas class="codex-stage" width="360" height="300"></canvas>
+    <div class="col" style="gap:6px;min-width:0">
+      <h2 style="color:var(--gold2);margin:0">${unitName(id)}</h2>
+      ${side === 0 ? `<div class="chip" style="align-self:flex-start">${t('lvShort')} ${num(lvl)}</div>` : ''}
+      <div class="stat-line">❤️ ${num(Math.round(d.hp * m))} · ${d.heal ? '✚ ' + num(Math.round(d.heal * m)) : '⚔️ ' + num(Math.round(d.dmg * m))} · 🎯 ${t('range')} ${num(d.range)} · 👟 ${t('speedStat')} ${num(d.speed)}</div>
+      ${tags(id) ? `<div class="stat-line">${tags(id)}</div>` : ''}
+      ${tk('ud_' + id) !== 'ud_' + id ? `<div style="color:var(--sand2)">${tk('ud_' + id)}</div>` : ''}
+      ${strong.length ? `<div class="stat-line">💪 ${t('strongVs')}: ${strong.map((x) => unitName(x as EnemyId)).join(isRtl() ? '، ' : ', ')}</div>` : ''}
+      ${counters.length ? `<div class="stat-line counters">🗡️ ${t('counterWith')}: ${counters.map((c2) => `<img src="${iconFor(c2)}" alt="" title="${unitName(c2)}">`).join('')}</div>` : ''}
+      <button class="btn secondary small" data-a="close" style="align-self:flex-start">${t('back')}</button>
+    </div>
+  </div></div>`);
+  document.getElementById('ui')!.appendChild(ov);
+  const cv = $<HTMLCanvasElement>(ov, '.codex-stage');
+  const ctx = cv.getContext('2d')!;
+  const u = { uid: 7, def: d, side, x: 180, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 0, moving: true, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? tierOf(lvl) : 0 };
+  let anim = 0, t0 = performance.now(), live = true;
+  const frame = (now: number) => {
+    if (!live) return;
+    const tt = (now - t0) / 1000;
+    const phase = tt % 4; // 2.4 s walking, then two attacks
+    u.moving = phase < 2.4;
+    if (u.moving) u.anim += 0.016 * (d.speed / 9);
+    else if (d.flying) u.anim += 0.016 * 6;
+    const atkT = phase < 2.4 ? 0 : (phase - 2.4) % 0.8;
+    u.attacking = atkT > 0 && atkT < 0.3 ? 0.3 - atkT : 0;
+    const k = Math.min(1, 210 / (d.height * 1.4 + 40));
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+    const g = ctx.createLinearGradient(0, 0, 0, cv.height); g.addColorStop(0, '#f6dfae'); g.addColorStop(1, '#c99a5a'); ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = 'rgba(80,50,20,.25)'; ctx.fillRect(0, 250, cv.width, 50);
+    ctx.setTransform(k, 0, 0, k, 180 * (1 - k), 250 * (1 - k));
+    ctx.fillStyle = 'rgba(40,20,5,.25)'; ctx.beginPath(); ctx.ellipse(180, 252, Math.min(70, d.height * 0.5), 9, 0, 0, 7); ctx.fill();
+    const swing = u.moving ? Math.sin(u.anim) * 0.55 : 0;
+    const atk = u.attacking > 0 ? Math.sin((1 - u.attacking / 0.3) * Math.PI) : 0;
+    drawArt({ c: ctx, u: u as never, x: 180, gy: d.flying ? 200 : 250, f: side === 0 ? 1 : -1, t: tt, swing, atk, side, region: 'oasis', flash: false, tier: u.tier });
+    anim = requestAnimationFrame(frame);
+  };
+  anim = requestAnimationFrame(frame);
+  const close = () => { live = false; cancelAnimationFrame(anim); ov.remove(); };
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  $(ov, '[data-a="close"]').addEventListener('click', () => { sfx('click'); close(); });
+}
+
 // ---------------- Menu ----------------
 function showMenu() {
   stopBattleLoop();
@@ -200,6 +305,7 @@ function showMenu() {
           <button class="btn secondary" data-go="rewards">🎁 ${t('daily')}${rewardsBadge() ? ' •' : ''}</button>
           <button class="btn secondary" data-go="army">🛡️ ${t('myArmy')}</button>
           <button class="btn secondary" data-go="ach">🏅 ${t('achievements')} <small>${num(save.achievements.length)}/${num(ACH.length)}</small></button>
+          <button class="btn secondary" data-go="codex">📖 ${t('codex')}</button>
           <button class="btn secondary" data-go="settings">⚙️ ${t('settings')}</button>
         </div>
       </div>
@@ -216,6 +322,7 @@ function showMenu() {
     if (go === 'settings') showSettings();
     if (go === 'ach') showAchievements();
     if (go === 'army') showArmies();
+    if (go === 'codex') showCodex();
   }));
   mount(el);
 }
@@ -366,27 +473,29 @@ function showRewards() {
 
 // ---------------- Settings ----------------
 function showSettings() {
-  const langs: [string, string][] = [['ar', 'العربية'], ['en', 'English'], ['tr', 'Türkçe']];
+
   const el = h(`<div class="screen">
     ${topbar()}
     <div class="grow settings-wrap">
       <div class="panel col settings">
-        <div class="row"><b class="grow">${t('language')}</b>${langs.map(([k, n]) => `<button class="btn small ${save.lang === k ? '' : 'secondary'}" data-lang="${k}">${n}</button>`).join('')}</div>
+        <div class="row lang-row"><b class="grow">🌐 ${t('language')}</b><div class="lang-grid">${LANGS.map((l) => `<button class="btn small ${save.lang === l.id ? '' : 'secondary'}" data-lang="${l.id}" lang="${l.id}" dir="${l.rtl ? 'rtl' : 'ltr'}">${l.name}</button>`).join('')}</div></div>
         <div class="row"><b class="grow">${t('difficulty')}</b></div>
         ${diffPicker()}
         <div class="row"><b class="grow">🎵 ${t('music')}</b><button class="btn small ${save.musicOn ? '' : 'secondary'}" data-a="music">${save.musicOn ? t('on') : t('off')}</button>
           <b>🔊 ${t('sfx')}</b><button class="btn small ${save.sound ? '' : 'secondary'}" data-a="sound">${save.sound ? t('on') : t('off')}</button></div>
         <div class="row"><b class="grow">🔁 ${t('musicRotate')}</b>${[0, 1, 2, 3, 5].map((m) => `<button class="btn small ${save.musicRotate === m ? '' : 'secondary'}" data-rot="${m}">${m ? num(m) + ' ' + t('min') : t('off')}</button>`).join('')}</div>
         <div class="tracks">${['auto', ...TRACKS.map((x) => x.id)].map((id) => `<button class="track ${save.music === id ? 'on' : ''}" data-track="${id}">${id === 'auto' ? '✨ ' + t('auto') : '🎶 ' + tk('t_' + id)}</button>`).join('')}</div>
-        <div class="row"><b class="grow">❤️ ${t('hpNumbers')}</b><button class="btn small ${save.showHp ? '' : 'secondary'}" data-a="hp">${save.showHp ? t('on') : t('off')}</button></div>
+        <div class="row"><b class="grow">❤️ ${t('hpNumbers')}</b><button class="btn small ${save.showHp ? '' : 'secondary'}" data-a="hp">${save.showHp ? t('on') : t('off')}</button>
+          <b>📳 ${t('vibrate')}</b><button class="btn small ${save.vibrate ? '' : 'secondary'}" data-a="vib">${save.vibrate ? t('on') : t('off')}</button></div>
         <div class="row"><b class="grow">🎥 ${t('camera')}</b>${(['both', 'arrows', 'touch'] as const).map((m) => `<button class="btn small ${save.camMode === m ? '' : 'secondary'}" data-cam="${m}">${t(m === 'both' ? 'camBoth' : m === 'arrows' ? 'camArrows' : 'camTouch')}</button>`).join('')}</div>
         <div class="row"><b class="grow">🖼️ ${t('quality')}</b>${(['auto', 'high', 'low'] as const).map((q) => `<button class="btn small ${save.quality === q ? '' : 'secondary'}" data-q="${q}">${t(('q_' + q) as Key)}</button>`).join('')}</div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v0.8.0</div>
+        <div style="font-size:12px;color:var(--muted)">v1.0.0</div>
       </div>
     </div>
   </div>`);
-  el.querySelectorAll<HTMLElement>('[data-lang]').forEach((b) => b.addEventListener('click', () => { save.lang = b.dataset.lang as 'ar' | 'en' | 'tr'; persist(); applySettings(); showSettings(); }));
+  el.querySelectorAll<HTMLElement>('[data-lang]').forEach((b) => b.addEventListener('click', () => { save.lang = b.dataset.lang as Lang; persist(); applySettings(); showSettings(); }));
+  el.querySelector('[data-a="vib"]')!.addEventListener('click', () => { save.vibrate = !save.vibrate; persist(); if (save.vibrate) buzz(40); showSettings(); });
   el.querySelector('[data-a="sound"]')!.addEventListener('click', () => { save.sound = !save.sound; persist(); setSound(save.sound); showSettings(); });
   el.querySelector('[data-a="music"]')!.addEventListener('click', () => { save.musicOn = !save.musicOn; persist(); setMusicOn(save.musicOn); if (save.musicOn) startMusic('menu', save.music); showSettings(); });
   el.querySelectorAll<HTMLElement>('[data-track]').forEach((b) => b.addEventListener('click', () => {
@@ -680,17 +789,33 @@ function boostAdsLeft() {
 function sessionStorageGet(k: string) { try { return localStorage.getItem(k); } catch { return null; } }
 function sessionStorageSet(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* ignore */ } }
 
+/** Scout report: the enemy types this level fields and the units that counter them. */
+function scoutHtml(L: LevelDef) {
+  const foes = [...new Set<EnemyId>([...(L.ai?.pool ?? []), ...L.waves.map((w) => w.unit)])].filter((id) => !UNITS[id].miner);
+  if (!foes.length) return '';
+  const have = (id: UnitId) => unitAvailable(id) || (isBase(id) && UNITS[id].unlock <= L.index);
+  const rec = new Map<UnitId, number>();
+  for (const f of foes) for (const c of countersOf(f)) if (have(c)) rec.set(c, (rec.get(c) ?? 0) + 1);
+  const best = [...rec.entries()].sort((a, z) => z[1] - a[1]).slice(0, 4).map(([id]) => id);
+  for (const f of foes) if (!save.seen.includes(f)) save.seen.push(f);
+  return `<div class="scout"><div class="scout-h">🔭 ${t('scout')}</div>
+    <div class="scout-row"><small>${t('scoutFace')}</small>${foes.map((f) => `<img src="${enemyIcon(f)}" alt="" title="${unitName(f)}">`).join('')}
+    ${best.length ? `<span class="scout-sep"></span><small>${t('counterWith')}</small>${best.map((c) => `<img src="${iconFor(c)}" alt="" title="${unitName(c)}">`).join('')}` : ''}</div>
+  </div>`;
+}
+
 function preBattle(index: number) {
   const L = LEVELS[index - 1];
   // First levels: straight into battle, no menus (PRD: understand in 30s).
   if (index <= 2 && !save.stars[index]) return startBattle(index, 0);
   const left = boostAdsLeft();
   const el = h(`<div class="screen dim">
-    <div class="panel col" style="align-items:center;text-align:center;min-width:320px">
+    <div class="panel col prebattle" style="align-items:center;text-align:center;min-width:320px">
       <div style="color:var(--muted);font-weight:700">${tk('r_' + L.region)}</div>
       <h2 style="font-size:34px;color:var(--gold2)">${L.boss ? '👑 ' + tk('b_' + L.region) : t('level') + ' ' + num(index)}</h2>
       <div class="big-stars" style="font-size:30px">${starsHtml(save.stars[index] ?? 0)}</div>
       <div style="font-size:13px;color:var(--muted)">${t('starRules')}</div>
+      ${scoutHtml(L)}
       ${diffPicker()}
       <button class="btn" data-a="go" style="font-size:22px;min-width:200px">⚔️ ${t('play')}</button>
       <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn secondary small" data-a="cancel">${t('back')}</button><button class="btn ad small" data-a="boost" ${left ? '' : 'disabled'}>${t('boostAd')} (${num(left)})</button></div>
@@ -723,7 +848,7 @@ function unitInfo(btn: HTMLElement, id: EnemyId) {
   const d = UNITS[id];
   const tags = [d.flying && '🪽', d.ranged && '🏹', d.heal && '✚', d.splash && '💥', d.hero && '⭐', d.premium && '👑'].filter(Boolean).join(' ');
   const r = btn.getBoundingClientRect();
-  const tip = h(`<div class="unit-tip"><b>${tk('u_' + id)}</b> ${tags}<div>❤️ ${num(d.hp)} · ${d.heal ? '✚ ' + num(d.heal) : '⚔️ ' + num(d.dmg)} · 🪙 ${num(b.costOf(id))} · ⏱ ${num(b.trainTime(id))}s</div>${tk('ud_' + id) !== 'ud_' + id ? `<small>${tk('ud_' + id)}</small>` : ''}</div>`);
+  const tip = h(`<div class="unit-tip"><b>${tk('u_' + id)}</b> ${tags}<div>❤️ ${num(d.hp)} · ${d.heal ? '✚ ' + num(d.heal) : '⚔️ ' + num(d.dmg)} · 🪙 ${num(b.costOf(id))} · ⏱ ${num(b.trainTime(id))}s</div>${tk('ud_' + id) !== 'ud_' + id ? `<small>${tk('ud_' + id)}</small>` : ''}<small class="auto">${b.repeat.has(id) ? t('autoOn') : t('autoHint')}</small></div>`);
   document.getElementById('app')!.appendChild(tip);
   tip.style.left = `${Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, r.left + r.width / 2 - tip.offsetWidth / 2))}px`;
   tip.style.top = `${r.top - tip.offsetHeight - 10}px`;
@@ -743,9 +868,14 @@ function startLevel(L: LevelDef, bonusGold: number) {
   battle = new Battle(L, perks(L), 150 + bonusGold, {
     onEnd: (win) => setTimeout(() => onBattleEnd(win), 1600),
     onStreak: (n, bonus) => { const k = n >= 12 ? 'st_godlike' : n >= 8 ? 'st_rampage' : n >= 5 ? 'st_mega' : 'st_triple'; ui.appendChild(h(`<div class="streak">${t(k as Key)} <small>+${num(bonus)} 🪙</small></div>`)); setTimeout(() => document.querySelector('.streak')?.remove(), 1600); sfx('rank'); },
-    onRage: () => { ui.appendChild(h(`<div class="boss-banner rage">🔥 ${t('rageMode')}</div>`)); sfx('volley'); },
-    onWave: (n) => { if (n % 5 === 0) ui.appendChild(h(`<div class="boss-banner">👑 ${t('wave')} ${num(n)}</div>`)); if (n % 3 === 0) setTimeout(() => skillCards(), 400); },
-    onRush: () => { ui.appendChild(h(`<div class="boss-banner rush">⚡ ${t('goldRush')}</div>`)); sfx('coin'); },
+    onRage: () => { bannerMsg(`🔥 ${t('rageMode')}`, 'rage'); sfx('volley'); },
+    onWave: (n) => { if (n % 5 === 0) bannerMsg(`👑 ${t('wave')} ${num(n)}`); if (n % 3 === 0) setTimeout(() => skillCards(), 400); },
+    onRush: () => { bannerMsg(`⚡ ${t('goldRush')}`, 'rush'); sfx('coin'); },
+    onLastStand: () => { bannerMsg(`🏰 ${t('lastStand')}`, 'rage'); buzz([60, 40, 120]); },
+    onWell: (owner) => { bannerMsg(owner === 0 ? `🌴 ${t('wellOurs')}` : `🌴 ${t('wellLost')}`, owner === 0 ? 'rush' : 'rage'); if (owner === 0) { sfx('coin'); buzz(30); } },
+    onDrop: (_kind, side) => { if (side === 0) buzz(25); },
+    onPerfect: () => { sfx('rank'); buzz(35); const p = h(`<div class="perfect-pop">✦ ${t('perfect')}</div>`); ui.appendChild(p); setTimeout(() => p.remove(), 900); },
+    onSpawn: (id, side) => { if (side === 1 && !save.seen.includes(id)) save.seen.push(id); },
     onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
     onUnitTrained: (id) => {
       rolloverDaily();
@@ -762,7 +892,7 @@ function startLevel(L: LevelDef, bonusGold: number) {
   const towerBanner = L.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(L.id))} · ${towerRule(Number(L.id)).icon} ${tk(towerRule(Number(L.id)).id)}` : '';
   const fac = L.kind === 'conquest' ? factionById(L.id!.split('-')[0]) : null;
   const banner = towerBanner || (fac ? `${fac.icon} ${tk('f_' + fac.id)} · ${t('battle')} ${num(Number(L.id!.split('-')[1]))}` : L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '');
-  if (banner) ui.appendChild(h(`<div class="boss-banner">${banner}</div>`));
+  if (banner) bannerMsg(banner);
   lastT = performance.now();
   raf = requestAnimationFrame(loop);
 }
@@ -834,6 +964,7 @@ function buildHud() {
       <button class="btn secondary small" data-a="follow" title="${t('follow')}">📍</button>
       <div class="boss-bar" data-r="bossbar" style="display:none"><b data-r="bossname"></b><div><i data-r="bosshp"></i></div></div>
       <span class="chip army-count" title="army">🛡️ <b data-r="myn">0</b> <i>⚔</i> <b data-r="en">0</b> 💀</span>
+      <span class="chip bonds-chip" data-r="bonds" title="${t('bonds')}" style="display:none"></span>
       <span class="chip">${kindLabel}</span>
       <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">▶${save.speed === 2 ? '▶' : ''} ×${save.speed}</button>
       <button class="btn secondary small" data-a="gear" aria-label="settings">⚙️</button>
@@ -843,7 +974,7 @@ function buildHud() {
       <div class="unit-pager">
         <button class="pg" data-pg="-1" aria-label="previous">‹</button>
         <div class="units">${unlockedUnits.map((id) => `<button class="ubtn ${UNITS[id].hero ? 'hero' : ''}" data-u="${id}" aria-label="${tk('u_' + id)}">
-          <span class="qn" style="display:none"></span><img src="${unitIcon(id)}" alt=""><span class="cost">${num(b.costOf(id))}</span><span class="prog"></span></button>`).join('')}</div>
+          <span class="qn" style="display:none"></span><span class="rep" style="display:none">↻</span><img src="${unitIcon(id)}" alt=""><span class="cost">${num(b.costOf(id))}</span><span class="prog"></span></button>`).join('')}</div>
         <button class="pg" data-pg="1" aria-label="next">›</button>
         <div class="pg-dots"></div>
       </div>
@@ -851,6 +982,7 @@ function buildHud() {
       <button class="tbtn" data-a="hide" title="${t('hideMiners')}">🏠<b data-r="hidelbl">${t('hide')}</b></button>
       <button class="tbtn" data-a="mine" title="${t('mineUp')}">⛏️<b data-r="mlvl">1/3</b><small data-r="mcost"></small></button>
       <button class="tbtn" data-a="tower" title="${t('towerArcher')}">🏹<b data-r="tcount">1/${MAX_TOWER_ARCHERS}</b><small data-r="tcost"></small></button>
+      <button class="tbtn" data-a="formation" title="${t('formation')}"><span data-r="fico">⚖️</span><b data-r="flbl">${t('f_line')}</b></button>
       <button class="cbtn" data-a="ctrl" title="${t('control')}">🎯</button>
       <div class="modes">
         <button class="mbtn" data-m="attack">⚔ ${t('attack')}</button>
@@ -879,7 +1011,7 @@ function buildHud() {
   // ---- paged unit bar: groups that fit the screen, switched with arrows, dots or a swipe ----
   const order = Array.from(el.querySelectorAll<HTMLElement>('[data-u]'));
   const btnW = innerHeight <= 430 ? 68 : 80;
-  const sideW = 4 * 70 + 160; // tower/mine/hide/ctrl buttons + modes + ability
+  const sideW = 5 * 70 + 160; // tower/mine/hide/formation/ctrl buttons + modes + ability
   const perPage = Math.max(3, Math.min(9, Math.floor((innerWidth - sideW - 70) / btnW)));
   const pages = Math.max(1, Math.ceil(order.length / perPage));
   const dots = $(el, '.pg-dots');
@@ -901,7 +1033,16 @@ function buildHud() {
     btn.addEventListener('pointerdown', (e: PointerEvent) => {
       e.preventDefault(); unlockAudio();
       const id = btn.dataset.u!;
-      press = { x: e.clientX, t: performance.now(), id, info: false, timer: window.setTimeout(() => { if (press) { press.info = true; unitInfo(btn, id as EnemyId); } }, 450) };
+      press = { x: e.clientX, t: performance.now(), id, info: false, timer: window.setTimeout(() => {
+        if (!press) return;
+        press.info = true; unitInfo(btn, id as EnemyId);
+        press.timer = window.setTimeout(() => { // keep holding: toggle auto-train for this unit
+          if (!press || !battle) return;
+          battle.toggleRepeat(id as EnemyId); buzz(30);
+          const tip = document.querySelector('.unit-tip small.auto');
+          if (tip) tip.textContent = battle.repeat.has(id as EnemyId) ? t('autoOn') : t('autoOff');
+        }, 550);
+      }, 450) };
     });
   });
   if (unitUpHandler) removeEventListener('pointerup', unitUpHandler);
@@ -916,6 +1057,25 @@ function buildHud() {
   };
   addEventListener('pointerup', unitUpHandler);
   unitsEl.addEventListener('pointerleave', () => { if (press) { clearTimeout(press.timer); } });
+  unitsEl.addEventListener('contextmenu', (e) => { // right-click on desktop toggles auto-train
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-u]');
+    if (!btn || !battle) return;
+    e.preventDefault(); battle.toggleRepeat(btn.dataset.u as EnemyId);
+  });
+  const fb = $(el, '[data-a="formation"]');
+  const FICO: Record<string, string> = { line: '⚖️', wedge: '🔺', wall: '🧱', skirmish: '🏹' };
+  fb.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); if (!battle) return;
+    const next = FORMATIONS[(FORMATIONS.indexOf(battle.formation) + 1) % FORMATIONS.length];
+    battle.setFormation(next);
+    $(fb, '[data-r="fico"]').textContent = FICO[next]; $(fb, '[data-r="flbl"]').textContent = t(('f_' + next) as Key);
+    document.querySelector('.form-tip')?.remove();
+    const tip = h(`<div class="unit-tip form-tip"><b>${FICO[next]} ${t(('f_' + next) as Key)}</b><small>${t(('fmd_' + next) as Key)}</small></div>`);
+    document.getElementById('app')!.appendChild(tip);
+    const r = fb.getBoundingClientRect();
+    tip.style.left = `${Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, r.left + r.width / 2 - tip.offsetWidth / 2))}px`; tip.style.top = `${r.top - tip.offsetHeight - 10}px`;
+    setTimeout(() => tip.remove(), 1800);
+  });
   const modes: Record<string, HTMLElement> = {};
   el.querySelectorAll<HTMLElement>('[data-m]').forEach((btn) => {
     modes[btn.dataset.m!] = btn;
@@ -944,7 +1104,7 @@ function buildHud() {
     p.addEventListener('pointerdown', on); p.addEventListener('pointerup', off); p.addEventListener('pointerleave', off); p.addEventListener('pointercancel', off);
   });
   const hit = $(pads[1], '[data-a="hit"]');
-  hit.addEventListener('pointerdown', (e) => { e.preventDefault(); if (battle) battle.ctrlAttack = true; hit.classList.add('held'); });
+  hit.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.pressAttack(); hit.classList.add('held'); });
   const hitOff = () => { if (battle) battle.ctrlAttack = false; hit.classList.remove('held'); };
   hit.addEventListener('pointerup', hitOff); hit.addEventListener('pointerleave', hitOff); hit.addEventListener('pointercancel', hitOff);
 
@@ -991,11 +1151,13 @@ addEventListener('pointerup', (e) => {
 // Keyboard support (desktop testing).
 addEventListener('keydown', (e) => {
   if (!battle) return;
-  if (unitPages && /^[1-9]$/.test(e.key)) { const id = unitPages.order[unitPage * unitPages.perPage + Number(e.key) - 1]; if (id) battle.train(id); }
+  const digit = /^Digit([1-9])$/.exec(e.code);
+  if (unitPages && digit) { const id = unitPages.order[unitPage * unitPages.perPage + Number(digit[1]) - 1]; if (id) { if (e.shiftKey) battle.toggleRepeat(id); else battle.train(id); } }
+  if (e.key === 'f') { const next = FORMATIONS[(FORMATIONS.indexOf(battle.formation) + 1) % FORMATIONS.length]; battle.setFormation(next); }
   if (e.key === 'Tab' && unitPages) { e.preventDefault(); unitPages.show(unitPage + (e.shiftKey ? -1 : 1)); }
   if (e.key === 'a' || e.key === 'ArrowLeft') battle.ctrlDir = -1;
   if (e.key === 'd' || e.key === 'ArrowRight') battle.ctrlDir = 1;
-  if (e.key === ' ') battle.ctrlAttack = true;
+  if (e.key === ' ' && !e.repeat) battle.pressAttack();
   if (e.key === 'q') battle.useAbility();
   if (e.key === 'e') battle.takeControl();
 });
@@ -1033,10 +1195,22 @@ function updateHud() {
   const mynEl = document.querySelector('[data-r="myn"]'), enEl = document.querySelector('[data-r="en"]');
   if (mynEl) mynEl.textContent = num(myn);
   if (enEl) enEl.textContent = num(en);
+  // active tribal bonds (player side)
+  const bondsEl = document.querySelector<HTMLElement>('[data-r="bonds"]');
+  if (bondsEl) {
+    const key = [...b.bonds[0]].sort().join(',');
+    if (bondsEl.dataset.k !== key) {
+      bondsEl.dataset.k = key;
+      bondsEl.style.display = key ? '' : 'none';
+      bondsEl.innerHTML = [...b.bonds[0]].map((id: BondId) => `<span title="${t(('bond_' + id) as Key)}: ${t(('bondd_' + id) as Key)}">${BONDS[id].icon}</span>`).join('');
+    }
+  }
   for (const id of b.roster) {
     const btn = r.btns[id];
     if (!btn) continue;
     btn.classList.toggle('cant', !b.canTrain(id));
+    const rep = btn.querySelector<HTMLElement>('.rep');
+    if (rep) { const on = b.repeat.has(id); if ((rep.style.display === 'none') === on) rep.style.display = on ? '' : 'none'; }
     const qn = b.queue.filter((q) => q.id === id).length;
     const qe = btn.querySelector<HTMLElement>('.qn')!;
     qe.style.display = qn ? '' : 'none';
@@ -1067,6 +1241,8 @@ function updateHud() {
   if (mc.width !== mc.clientWidth * 2) { mc.width = mc.clientWidth * 2; mc.height = mc.clientHeight * 2; }
   const k = mc.width / W;
   mx.clearRect(0, 0, mc.width, mc.height);
+  mx.fillStyle = b.well.owner === 0 ? '#7dff9a' : b.well.owner === 1 ? '#ff7a6a' : 'rgba(255,255,255,.5)'; mx.beginPath(); mx.arc(W / 2 * k, mc.height - 6, 4, 0, 7); mx.fill();
+  for (const d of b.drops) { mx.fillStyle = '#ffe066'; mx.fillRect(d.x * k - 2, mc.height - 10, 4, 4); }
   for (const u of b.units) { if (u.dead || u.def.miner) continue; mx.fillStyle = u.side ? '#e0453a' : '#ffd34d'; mx.fillRect(u.x * k - 2, u.def.flying ? 4 : 12, u.def.boss ? 8 : 4, u.def.boss ? 14 : 10); }
   mx.strokeStyle = 'rgba(255,255,255,.8)'; mx.lineWidth = 3; mx.strokeRect(renderer.cam * k, 2, renderer.viewW * k, mc.height - 4);
 }
@@ -1152,6 +1328,7 @@ function statsHtml(b: Battle) {
   const row = (icon: string, k: Key, v: number) => `<div class="stat-cell"><span>${icon}</span><b>${num(Math.round(v))}</b><small>${t(k)}</small></div>`;
   return `<div class="stats-box">
     ${row('⚔️', 'st_kills', s.kills)}${row('💀', 'st_lost', s.lost)}${row('🛡️', 'st_trained', s.trained)}${row('🪙', 'st_mined', s.mined)}${b.level.ai ? row('⛏️', 'st_minersKilled', s.enemyMinersKilled) : ''}
+    ${s.wellTime >= 1 ? row('🌴', 'st_well', s.wellTime) : ''}${s.drops ? row('📦', 'st_drops', s.drops) : ''}${s.perfect ? row('✦', 'st_perfect', s.perfect) : ''}
     ${mvp ? `<div class="stat-cell mvp"><img src="${iconFor(mvp[0])}" alt=""><small>${t('mvp')}: ${tk('u_' + mvp[0])}</small></div>` : ''}
   </div>`;
 }
@@ -1230,8 +1407,8 @@ function onBattleEnd(win: boolean) {
     <div class="loot"><span class="chip gold-chip" style="font-size:22px">🪙 <b data-r="g">${num(gold)}</b></span>${gems ? `<span class="chip" style="font-size:22px">💎 ${num(gems)}</span>` : ''}</div>
     ${statsHtml(b)}
     ${chestHtml(rollChest(L, stars))}
-    <button class="btn ad" data-a="double">${t('doubleAd')}</button>
-    <div class="row"><button class="btn" data-a="next">${t('next')} ${getLang() === 'ar' ? '◀' : '▶'}</button><button class="btn secondary" data-a="menu">${t('campaign')}</button></div>
+    <div class="row" style="justify-content:center"><button class="btn ad" data-a="double">${t('doubleAd')}</button><button class="btn secondary" data-a="share">📤 ${t('share')}</button></div>
+    <div class="row"><button class="btn" data-a="next">${t('next')} ${isRtl() ? '◀' : '▶'}</button><button class="btn secondary" data-a="menu">${t('campaign')}</button></div>
   </div></div>`);
   ui.appendChild(el);
   bindChest(el);
@@ -1244,6 +1421,7 @@ function onBattleEnd(win: boolean) {
     sfx('coin');
     persist();
   });
+  el.querySelector('[data-a="share"]')!.addEventListener('click', () => { sfx('click'); void shareVictory(b, stars); });
   const leave = async (next: () => void) => {
     stopBattleLoop();
     // Interstitial rules (PRD 7): only after result, level >= 6, max 1 per 3 battles,
@@ -1257,6 +1435,42 @@ function onBattleEnd(win: boolean) {
   };
   el.querySelector('[data-a="next"]')!.addEventListener('click', () => leave(() => preBattle(Math.min(LEVELS.length, L.index + 1))));
   el.querySelector('[data-a="menu"]')!.addEventListener('click', () => leave(() => showCampaign()));
+}
+
+/** Builds a 1200×630 victory card (MVP portrait, stars, stats) and shares or downloads it. */
+async function shareVictory(b: Battle, stars: number) {
+  const cv = document.createElement('canvas'); cv.width = 1200; cv.height = 630;
+  const c = cv.getContext('2d')!;
+  const g = c.createLinearGradient(0, 0, 1200, 630); g.addColorStop(0, '#3a2412'); g.addColorStop(0.55, '#7a4a1e'); g.addColorStop(1, '#e0a84a');
+  c.fillStyle = g; c.fillRect(0, 0, 1200, 630);
+  c.fillStyle = 'rgba(255,220,150,.08)'; for (let i = 0; i < 9; i++) { c.beginPath(); c.moveTo(900, -40); c.lineTo(600 + i * 90, 700); c.lineTo(640 + i * 90, 700); c.closePath(); c.fill(); }
+  // dunes
+  c.fillStyle = '#c98f4a'; c.beginPath(); c.moveTo(0, 520); c.quadraticCurveTo(300, 450, 620, 520); c.quadraticCurveTo(900, 590, 1200, 500); c.lineTo(1200, 630); c.lineTo(0, 630); c.fill();
+  const mvp = (Object.entries(b.stats.damage) as [UnitId, number][]).sort((a, z) => z[1] - a[1])[0]?.[0] ?? 'sword';
+  const img = new Image(); img.src = Renderer.icon(UNITS[mvp], 420, 0, tierOf(save.unitLevels[mvp] ?? 1));
+  await img.decode().catch(() => undefined);
+  const rtl = isRtl();
+  const tx = rtl ? 1140 : 60;
+  c.drawImage(img, rtl ? 40 : 740, 150, 420, 420);
+  c.direction = rtl ? 'rtl' : 'ltr'; c.textAlign = rtl ? 'right' : 'left';
+  const font = getComputedStyle(document.documentElement).getPropertyValue('--font') || 'sans-serif';
+  c.fillStyle = '#ffd34d'; c.font = `900 84px ${font}`; c.fillText(t('title'), tx, 120);
+  c.fillStyle = '#fff6dc'; c.font = `900 54px ${font}`; c.fillText(`${t('victory')} · ${t('level')} ${num(b.level.index)}`, tx, 200);
+  c.fillStyle = '#ffd34d'; c.font = `900 70px ${font}`; c.fillText('★'.repeat(stars) + '☆'.repeat(3 - stars), tx, 290);
+  c.fillStyle = '#fff'; c.font = `700 34px ${font}`;
+  const lines = [`⚔️ ${t('st_kills')}: ${num(b.stats.kills)}`, `⏱ ${t('time')}: ${Math.floor(b.time / 60)}:${String(Math.floor(b.time % 60)).padStart(2, '0')}`, `🏅 ${t('mvp')}: ${unitName(mvp)}`];
+  lines.forEach((ln, i) => c.fillText(ln, tx, 370 + i * 52));
+  c.fillStyle = 'rgba(0,0,0,.35)'; c.font = `700 26px ${font}`; c.fillText(t('shareText'), tx, 590);
+  const blob: Blob | null = await new Promise((res) => cv.toBlob(res, 'image/png'));
+  if (!blob) return;
+  const file = new File([blob], 'sand-wars-victory.png', { type: 'image/png' });
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+  try {
+    if (nav.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: t('title'), text: t('shareText') }); return; }
+  } catch { /* cancelled or unsupported: fall back to a download */ }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`<span class="toast-ico">🖼️</span><div><b>${t('imageSaved')}</b></div>`);
 }
 
 function backTo(L: LevelDef) {

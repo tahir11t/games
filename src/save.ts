@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { PLAYER_UNITS, type UnitId } from './data/units';
 import type { Difficulty } from './game/battle';
 import type { AbilityId, PassiveId, ChallengeId } from './data/skills';
-import type { Lang } from './i18n';
+import { detectLang, type Lang } from './i18n';
 
 export interface SaveData {
   v: 1;
@@ -43,6 +43,8 @@ export interface SaveData {
   sub: { plan: 'weekly' | 'monthly' | null; until: number; lastClaim: string | null; days: number };
   purchases: string[]; // store product ids bought (test mode until Play Billing is wired)
   dailyDone: string | null;
+  seen: string[]; // enemy types met in battle (Codex discovery)
+  vibrate: boolean;
   updatedAt: number;
 }
 
@@ -58,7 +60,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function defaultSave(): SaveData {
   return {
     v: 1,
-    lang: navigator.language?.startsWith('ar') ? 'ar' : navigator.language?.startsWith('tr') ? 'tr' : 'en',
+    lang: detectLang(),
     sound: true,
     gold: 0,
     gems: 0,
@@ -95,6 +97,8 @@ export function defaultSave(): SaveData {
     purchases: [],
     survivalBest: 0,
     dailyDone: null,
+    seen: [],
+    vibrate: true,
     updatedAt: Date.now(),
   };
 }
@@ -198,7 +202,7 @@ export function track(name: string, params: Record<string, unknown> = {}) {
 export async function flushEvents() {
   if (!sb || !userId || !queue.length) return;
   const batch = queue.splice(0, queue.length).map((e) => ({
-    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '0.1.0', locale: save.lang,
+    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.0.0', locale: save.lang,
   }));
   const { error } = await sb.from('analytics_events').insert(batch);
   if (error) console.warn('[analytics] flush failed', error.message);
