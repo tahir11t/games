@@ -111,6 +111,34 @@ Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on me
 - **Camera:** on-screen ◀ ▶ arrows (hold to scroll), a 📍 follow button, and a Settings choice: arrows + touch, arrows only, or touch only.
 - **14 achievements** with gem rewards, a pop-up notice, and an achievements screen.
 
+## v0.5: civilizations, health numbers, no more unit walls, new music
+
+- **Clash of Civilizations:** a new mode with 5 civilizations, each with its own army, region, boss and mechanic, and 5 battles (the boss comes in battle 5).
+  - 🌿 **Elves** (Elven Forest): long-range archers, dodging blade dancers, druid healers, elk riders, self-healing treants; boss: Elf Queen.
+  - 👻 **Ghosts** (City of Shadows): flying wraiths, wailing banshees (splash), specter knights, phantoms; boss: Ghost King.
+  - 🧟 **Zombies** (Cursed Graveyard): cheap hordes, runners, bloaters that explode on death, skeleton archers, necromancers that raise zombies, abominations; boss: Plague Lord.
+  - ⚒️ **Dwarves** (mountains): rich mines, axe throwers, shield walls, berserkers, cannons, gyrocopters; boss: Dwarf King.
+  - 🗻 **Giants** (Frozen Tundra): goblin workers and spearmen, ogres, regenerating trolls, boulder-throwing cyclopes, frost giants; boss: Giant King.
+  - Each civilization mines with its own worker type. New engine mechanics: regeneration, explode on death, summoning, faster mining.
+  - Tuned with `npx tsx scripts/conquest.ts --tune`.
+- **Health:**
+  - A health bar on every unit, with the number shown when hurt.
+  - Floating damage numbers (rapid hits merge into one) and green heal numbers.
+  - Toggle in Settings.
+- **No walls:** units blocked by standing allies slide into free lanes and squeeze past, so back ranks always get through.
+- **Promotions:** ★ / ★★ / ★★★ at 3 / 7 / 12 kills; each heals 30% / 50% / 100%. Bosses don't rank up.
+- **Upgrade looks are clearly different:**
+  - Tier 1: bronze cap.
+  - Tier 2: silver helmet with nose guard and a richer tunic.
+  - Tier 3: gold crested helmet and a gold blade.
+  - Tier 4: winged gold helmet with an aura.
+  - Weapons grow 10% per tier.
+- **Music rebuilt:**
+  - Look-ahead scheduling on the audio clock (steady rhythm), a reverb hall, and richer oud, qanun, ney, string pad, bass and darbuka sounds.
+  - Tracks have sections (A/B/break); new Elven Forest track (6 total).
+  - **Automatic switching every 1/2/3/5 minutes**, chosen in Settings.
+- New regions with weather: falling leaves (forest), fog (graveyard), snowfall (tundra).
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

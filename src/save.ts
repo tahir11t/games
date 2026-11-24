@@ -34,6 +34,10 @@ export interface SaveData {
   quality: 'auto' | 'high' | 'low';
   achievements: string[];
   totals: { kills: number; bosses: number };
+  conquest: Record<string, number>; // faction -> battles won
+  conquestStars: Record<string, number>; // 'elves-3' -> stars
+  musicRotate: number; // minutes between automatic track changes (0 = off)
+  showHp: boolean;
   dailyDone: string | null;
   updatedAt: number;
 }
@@ -43,7 +47,7 @@ const KEY = 'sandwars.save.v1';
 /** Fill in fields added after a save was written (shallow + nested maps). */
 export function migrate(raw: Partial<SaveData>): SaveData {
   const d = defaultSave();
-  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals } };
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars } };
 }
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -77,6 +81,10 @@ export function defaultSave(): SaveData {
     quality: 'auto',
     achievements: [],
     totals: { kills: 0, bosses: 0 },
+    conquest: {},
+    conquestStars: {},
+    musicRotate: 0,
+    showHp: true,
     survivalBest: 0,
     dailyDone: null,
     updatedAt: Date.now(),

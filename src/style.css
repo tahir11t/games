@@ -236,3 +236,20 @@ h1, h2, h3 { margin: 0; }
 .ach.got { opacity: 1; border-color: var(--gold2); }
 .ach-ico { font-size: 30px; width: 44px; text-align: center; } .ach .meta { flex: 1; display: flex; flex-direction: column; } .ach small { color: var(--muted); font-size: 12px; }
 @media (max-height: 430px) { .tbtn { width: 54px; height: 54px; font-size: 18px; } .cam-arrow { width: 44px; height: 60px; top: 34%; } }
+
+/* ---------- v0.5: civilizations ---------- */
+.modes-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important; }
+.fac-list { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; padding: 10px 0; overflow-y: auto; align-content: start; touch-action: pan-y; }
+.fac-card { display: flex; gap: 10px; align-items: center; text-align: start; background: linear-gradient(135deg, color-mix(in srgb, var(--fc) 45%, #2b1d10), #2b1d10); border: 2px solid var(--fc); border-radius: 16px; padding: 8px 12px; color: var(--sand); }
+.fac-card.locked { filter: grayscale(.85) brightness(.7); }
+.fac-portraits { position: relative; width: 84px; height: 72px; flex: 0 0 auto; }
+.fac-portraits img { position: absolute; width: 62px; height: 62px; left: 0; top: 4px; }
+.fac-portraits img.boss { left: 30px; top: 0; width: 66px; height: 66px; }
+.fac-card .name { font-weight: 900; font-size: 17px; }
+.fac-card .stat { font-size: 12px; color: var(--sand2); }
+.pips { display: flex; gap: 4px; margin-top: 4px; } .pips i { width: 16px; height: 8px; border-radius: 4px; background: rgba(0,0,0,.45); } .pips i.on { background: var(--gold2); } .pips i.boss { width: 22px; }
+.fac-head { display: flex; justify-content: center; gap: 12px; align-items: baseline; margin-top: 6px; } .fac-head b { font-size: 22px; color: var(--gold2); } .fac-head span { color: var(--sand2); font-size: 13px; }
+.fac-units { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin: 6px 0; }
+.fu { display: flex; flex-direction: column; align-items: center; width: 70px; } .fu img { width: 54px; height: 54px; background: rgba(0,0,0,.25); border-radius: 10px; } .fu small { font-size: 10.5px; color: var(--sand2); text-align: center; } .fu.boss img { border: 2px solid #e0453a; }
+.fac-battles { display: flex; gap: 10px; justify-content: center; padding: 6px 0; } .fac-battles .lvl { width: 92px; aspect-ratio: 1.15; }
+@media (max-height: 430px) { .fu { width: 58px; } .fu img { width: 42px; height: 42px; } .fac-battles .lvl { width: 72px; font-size: 18px; } .fac-units { margin: 2px 0; } }

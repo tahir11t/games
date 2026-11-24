@@ -1,4 +1,4 @@
-import { UNITS, MINER_GOLD, MINER_INTERVAL, MAX_MINERS, MAX_ARMY, CONTROL_BONUS, COUNTER_BONUS, FLY_HEIGHT, MAX_RANK, upgradeMult, type EnemyId, type UnitId, type UnitDef } from '../data/units';
+import { UNITS, MINER_GOLD, MINER_INTERVAL, MAX_MINERS, MAX_ARMY, CONTROL_BONUS, COUNTER_BONUS, FLY_HEIGHT, MAX_RANK, RANK_KILLS, RANK_HEAL, upgradeMult, type EnemyId, type UnitId, type UnitDef } from '../data/units';
 import { costOf, type LevelDef } from '../data/levels';
 import { ABILITIES, passiveFx, type Perks } from '../data/skills';
 import { survivalWave } from '../data/challenges';
@@ -50,6 +50,8 @@ export interface Unit {
   raid: boolean; // enemy raider: hunts miners
   lastDx: number; // movement last frame (for queueing)
   tier: number; // visual tier 0..4
+  summonCd: number;
+  dmgText?: FloatText; // merges rapid hits into one rising number
 }
 
 export interface Projectile {
@@ -64,7 +66,7 @@ export interface Projectile {
 }
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; }
-export interface FloatText { x: number; y: number; text: string; life: number; color: string; size?: number; }
+export interface FloatText { x: number; y: number; text: string; life: number; color: string; size?: number; value?: number; }
 export interface QueueItem { id: EnemyId; left: number; }
 
 export interface BattleStats { trained: number; kills: number; lost: number; mined: number; damage: Partial<Record<UnitId, number>>; enemyMinersKilled: number; bossKills: number; }
@@ -148,8 +150,9 @@ export class Battle {
     this.towerArchers[1] = (level.towerDmg ?? 0) > 0 ? 1 : 0;
     if (level.ai) {
       this.egold = level.ai.startGold;
-      this.spawn('miner', 1);
-      this.spawn('miner', 1).x -= 20;
+      const em = level.ai.miner ?? 'miner';
+      this.spawn(em, 1);
+      this.spawn(em, 1).x -= 20;
       this.aiAttackSize = 4 + Math.floor(Math.random() * 3);
     }
   }
@@ -162,7 +165,7 @@ export class Battle {
   }
   minerCount(side: Side = 0) {
     const q = side === 0 ? this.queue : this.equeue;
-    return this.units.filter((u) => u.side === side && !u.dead && u.def.id === 'miner').length + q.filter((x) => x.id === 'miner').length;
+    return this.units.filter((u) => u.side === side && !u.dead && u.def.miner).length + q.filter((x) => UNITS[x.id].miner).length;
   }
   armyCount(side: Side = 0) { return this.units.filter((u) => u.side === side && !u.dead).length + (side === 0 ? this.queue : this.equeue).length; }
 
@@ -200,6 +203,7 @@ export class Battle {
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
       chargeReady: !!def.charge, calm: 0, mineTimer: Math.random() * 2, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0,
+      summonCd: def.summon?.every ?? 0,
       tier: side === 0 ? tierOf(this.perks.unitLevels[id as UnitId] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
@@ -317,10 +321,22 @@ export class Battle {
       u.attacking = Math.max(0, u.attacking - dt);
       u.hitFlash = Math.max(0, u.hitFlash - dt);
       u.healFx = Math.max(0, u.healFx - dt);
+      if (u.def.regen && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + u.def.regen * (u.maxHp / u.def.hp) * dt);
+      if (u.def.summon) {
+        u.summonCd -= dt;
+        if (u.summonCd <= 0) {
+          u.summonCd = u.def.summon.every;
+          if (this.armyCount(u.side) < MAX_ARMY) {
+            const m = this.spawn(u.def.summon.unit, u.side, u.side === 1 ? this.enemyStat : 1);
+            m.x = u.x + (u.side === 0 ? 20 : -20);
+            for (let i = 0; i < 6; i++) this.dust(m.x, GROUND - 10, '#7a6a55', 4);
+          }
+        }
+      }
       u.moving = false;
       this.stepDt = dt;
       const x0 = u.x;
-      if (u.def.id === 'miner' && u !== this.controlled) this.updateMiner(u, dt);
+      if (u.def.miner && u !== this.controlled) this.updateMiner(u, dt);
       else if (u.def.heal || u.def.support) this.updateSupport(u, dt);
       else this.updateFighter(u, dt);
       u.lastDx = u.x - x0;
@@ -413,7 +429,7 @@ export class Battle {
   }
 
   private pickEnemyUnit(ai: 1 | 2 | 3): EnemyId | null {
-    const pool = this.level.ai!.pool.filter((u) => u !== 'miner');
+    const pool = this.level.ai!.pool.filter((u) => !UNITS[u].miner);
     const affordable = pool.filter((u) => costOf(u) <= this.egold);
     const mine = this.playerArmy.filter((u) => u.def.id !== 'miner');
     const flyers = mine.filter((u) => u.def.flying).length;
@@ -461,7 +477,7 @@ export class Battle {
     // Economy: grow the mining crew over time.
     const targetMiners = Math.min(A.maxMiners + (ai === 3 ? 1 : 0), 2 + Math.floor(this.time / (ai === 1 ? 30 : 20)));
     if (this.minerCount(1) < targetMiners && this.egold >= 50 && this.equeue.length < 2) {
-      this.egold -= 50; this.equeue.push({ id: 'miner', left: UNITS.miner.train });
+      this.egold -= 50; this.equeue.push({ id: A.miner ?? 'miner', left: UNITS.miner.train });
     } else if (this.equeue.length < 2 && this.armyCount(1) < MAX_ARMY) {
       const pick = this.pickEnemyUnit(ai);
       if (pick && costOf(pick) <= this.egold) { this.egold -= costOf(pick); this.equeue.push({ id: pick, left: Math.max(2, UNITS[pick].train || costOf(pick) / 50) }); }
@@ -485,7 +501,7 @@ export class Battle {
     for (const u of army) u.raid = false;
     if (ai === 3 && this.emode !== 'defend' || (ai === 3 && !intruders)) {
       const fast = army.filter((u) => u.def.speed >= 90 && !u.def.flying).slice(0, 2);
-      if (this.units.some((u) => u.side === 0 && u.def.id === 'miner' && !u.dead)) for (const u of fast) u.raid = true;
+      if (this.units.some((u) => u.side === 0 && u.def.miner && !u.dead)) for (const u of fast) u.raid = true;
     }
     // Hard AI reinforces its fort with a second archer once it is rich.
     if (ai === 3 && this.towerArchers[1] === 1 && this.egold > 520 && this.time > 70) { this.egold -= 300; this.towerArchers[1] = 2; }
@@ -530,7 +546,7 @@ export class Battle {
       u.x += Math.sign(mx - u.x) * u.def.speed * dt;
       u.moving = true;
     } else {
-      u.mineTimer += dt * this.goldMult(u.side);
+      u.mineTimer += dt * this.goldMult(u.side) * (u.def.mineMult ?? 1);
       if (u.mineTimer >= MINER_INTERVAL) {
         u.mineTimer -= MINER_INTERVAL;
         if (u.side === 0) {
@@ -555,6 +571,7 @@ export class Battle {
       if (best) {
         best.hp = Math.min(best.maxHp, best.hp + u.def.heal! * upgradeMult(this.perks.unitLevels[u.def.id as UnitId] ?? 1));
         best.healFx = 0.6;
+        if (this.texts.length < 70) this.texts.push({ x: best.x, y: this.unitY(best) - best.def.height - 26, text: `+${Math.round(u.def.heal! * upgradeMult(this.perks.unitLevels[u.def.id as UnitId] ?? 1))}`, life: 0.7, color: '#7dff9a', size: 13 });
         u.attacking = 0.3;
         u.cd = u.def.cooldown;
       }
@@ -685,17 +702,20 @@ export class Battle {
    */
   private step(u: Unit, dx: number) {
     if (!dx) return;
-    if (u.def.flying || u === this.controlled || u.def.id === 'miner') { u.x += dx; return; }
+    if (u.def.flying || u === this.controlled || u.def.miner) { u.x += dx; return; }
     const dir = Math.sign(dx);
     for (const o of this.units) {
-      if (o === u || o.dead || o.side !== u.side || o.def.flying || o.def.id === 'miner') continue;
+      if (o === u || o.dead || o.side !== u.side || o.def.flying || o.def.miner) continue;
       const ahead = (o.x - u.x) * dir;
-      const minD = Math.min(24, (u.def.height + o.def.height) * 0.15);
+      const minD = Math.min(22, (u.def.height + o.def.height) * 0.14);
       if (ahead <= 0 || ahead > minD || Math.abs(o.lane - u.lane) > 8) continue;
       if (o.lastDx * dir > 0.01) continue; // ally walking the same way: just follow
+      // Blocked by a standing ally: slide into a free lane and squeeze past
+      // (slower) instead of forming a wall the back ranks can't cross.
       const side = u.lane >= o.lane ? 1 : -1;
-      const nl = u.lane + side * 45 * this.stepDt;
-      if (Math.abs(nl) <= 18) { u.lane = nl; u.x += dx * 0.3; }
+      const nl = u.lane + side * 50 * this.stepDt;
+      u.lane = Math.abs(nl) <= 18 ? nl : u.lane - side * 50 * this.stepDt;
+      u.x += dx * 0.6;
       return;
     }
     u.x += dx;
@@ -853,12 +873,13 @@ export class Battle {
     const dealt = Math.min(o.hp, dmg);
     o.hp -= dmg;
     o.hitFlash = 0.12;
+    this.damageNumber(o, dealt, isSplash);
     if (src?.side === 0) this.stats.damage[src.def.id as UnitId] = (this.stats.damage[src.def.id as UnitId] ?? 0) + dealt;
     if (o.hp <= 0 && !o.dead) {
       o.dead = 0.001;
       if (o.side === 1) {
         this.stats.kills++;
-        if (o.def.id === 'miner') this.stats.enemyMinersKilled++;
+        if (o.def.miner) this.stats.enemyMinersKilled++;
         if (o.def.boss) this.stats.bossKills++;
         const bounty = Math.round((o.def.boss ? 200 : 8 + o.def.hp / 25) * (this.level.mods?.goldMult ?? 1));
         this.gold += bounty;
@@ -867,17 +888,38 @@ export class Battle {
         this.stats.lost++;
         this.egold += Math.round(4 + o.def.hp / 40); // enemy earns a small bounty too
       }
-      if (src && !src.dead && src.rank < MAX_RANK) {
+      if (src && !src.dead && !src.def.boss && src.rank < MAX_RANK) {
         src.kills++;
-        if (src.kills >= (src.rank === 0 ? 3 : 7)) {
+        if (src.kills >= RANK_KILLS[src.rank]) {
           src.rank++;
-          src.maxHp *= 1.15; src.dmg *= 1.15; src.hp = Math.min(src.maxHp, src.hp + src.maxHp * 0.3);
-          this.texts.push({ x: src.x, y: this.unitY(src) - src.def.height - 16, text: '★'.repeat(src.rank), life: 1.2, color: '#ffe066', size: 22 });
+          src.maxHp *= 1.15; src.dmg *= 1.15;
+          // Promotion heals: ★ 30%, ★★ 50%, ★★★ full.
+          const healed = Math.min(src.maxHp - src.hp, src.maxHp * RANK_HEAL[src.rank - 1]);
+          src.hp += healed; src.healFx = 1.2;
+          this.texts.push({ x: src.x, y: this.unitY(src) - src.def.height - 16, text: '★'.repeat(src.rank), life: 1.3, color: '#ffe066', size: 22 });
+          if (healed > 1) this.texts.push({ x: src.x, y: this.unitY(src) - src.def.height - 36, text: `+${Math.round(healed)}`, life: 1.1, color: '#7dff9a', size: 16 });
           this.ev.onRank?.(src);
         }
       }
       for (let i = 0; i < 8; i++) this.dust(o.x, this.unitY(o) - o.def.height * 0.5, o.def.id === 'ghost' || o.def.id === 'djinn' ? '#9fd8ff' : '#f0dcae', 3 + Math.random() * 4);
+      if (o.def.explode) { // bloater bursts and hurts everyone nearby on the other side
+        const e = o.def.explode;
+        for (let i = 0; i < 16; i++) this.dust(o.x, GROUND - 20, i % 2 ? '#8fbf3a' : '#c6e070', 5 + Math.random() * 6);
+        this.shake = Math.min(0.6, this.shake + 0.25); sfx('boom');
+        for (const v of this.units) if (v.side !== o.side && !v.dead && Math.abs(v.x - o.x) < e.radius && !v.def.flying) this.applyDamage(v, e.dmg * (o.side === 1 ? this.enemyStat : 1), true);
+      }
     }
+  }
+
+  /** Floating damage numbers; rapid hits on the same unit merge into one. */
+  private damageNumber(o: Unit, amount: number, small: boolean) {
+    if (amount < 0.5) return;
+    const t = o.dmgText;
+    if (t && t.life > 0.55) { t.value = (t.value ?? 0) + amount; t.text = `-${Math.round(t.value)}`; t.life = Math.max(t.life, 0.8); return; }
+    if (this.texts.length > 70) return;
+    const nt: FloatText = { x: o.x + (Math.random() - 0.5) * 14, y: this.unitY(o) - o.def.height - 22, text: `-${Math.round(amount)}`, life: 0.9, color: o.side === 0 ? '#ff6b5a' : '#ffffff', size: small ? 13 : 15, value: amount };
+    o.dmgText = nt;
+    this.texts.push(nt);
   }
 
   dust(x: number, y: number, color: string, size: number) {

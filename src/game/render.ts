@@ -4,7 +4,7 @@ import { drawArt, glowDot, isLowQuality, shade as shadeHex } from './art';
 import { UNITS } from '../data/units';
 
 const INK = '#16120e';
-const TEAM = ['#e0a82e', '#9e1f1f'];
+let TEAM = ['#e0a82e', '#9e1f1f'];
 
 interface Theme { sky: [string, string, string]; far: string; mid: string; ground: [string, string]; grass?: string; sun: string; haze: string; night?: boolean }
 const THEMES: Record<RegionId, Theme> = {
@@ -13,6 +13,9 @@ const THEMES: Record<RegionId, Theme> = {
   mountains: { sky: ['#6fb6e2', '#b6dcf0', '#f2f4ea'], far: '#9a9488', mid: '#76a05a', ground: ['#c9b893', '#ad9a75'], grass: '#6f9a4e', sun: '#fffbe0', haze: 'rgba(230,240,250,.3)' },
   shadow: { sky: ['#0d1230', '#2a2658', '#5a4b7d'], far: '#262447', mid: '#34305c', ground: ['#948cab', '#7a7294'], sun: '#f3ecd0', haze: 'rgba(80,70,140,.2)', night: true },
   tombs: { sky: ['#3a2a4a', '#8a5a5a', '#e0a070'], far: '#7a5a48', mid: '#5c4436', ground: ['#c4a27a', '#a8865e'], sun: '#ffcf8a', haze: 'rgba(255,170,110,.18)' },
+  forest: { sky: ['#3f9fd8', '#a8dcf0', '#e8f6e0'], far: '#5f9a5a', mid: '#3f7a3e', ground: ['#8fb862', '#6f9a48'], grass: '#4f8f3a', sun: '#fffbe0', haze: 'rgba(200,240,200,.25)' },
+  graveyard: { sky: ['#1e2a2a', '#3f4f4a', '#7a8a78'], far: '#2f3a36', mid: '#3a4640', ground: ['#6a6f58', '#4f5442'], grass: '#4a5a3a', sun: '#d8e8c8', haze: 'rgba(160,190,160,.3)', night: true },
+  tundra: { sky: ['#7fb2d8', '#c8e2f2', '#f4fbff'], far: '#c9d8e6', mid: '#a8bfd2', ground: ['#eef4f8', '#d2dee8'], sun: '#ffffff', haze: 'rgba(230,240,255,.35)' },
 };
 
 export class Renderer {
@@ -45,7 +48,7 @@ export class Renderer {
     let target: number;
     if (b.controlled) target = b.controlled.x - this.viewW * 0.4;
     else {
-      const army = b.playerArmy.filter((u) => u.def.id !== 'miner');
+      const army = b.playerArmy.filter((u) => !u.def.miner);
       const front = army.length ? Math.max(...army.map((u) => u.x)) : CASTLE_X[0];
       target = front - this.viewW * 0.6;
     }
@@ -58,6 +61,7 @@ export class Renderer {
     const th = THEMES[b.level.region];
     const time = (performance.now() - this.t0) / 1000;
     const low = isLowQuality();
+    TEAM = ['#e0a82e', b.level.enemyColor ?? '#9e1f1f'];
     c.setTransform(1, 0, 0, 1, 0, 0);
     const sk = c.createLinearGradient(0, 0, 0, this.canvas.height * 0.75);
     sk.addColorStop(0, th.sky[0]); sk.addColorStop(0.55, th.sky[1]); sk.addColorStop(1, th.sky[2]);
@@ -98,6 +102,7 @@ export class Renderer {
       c.fillStyle = 'rgba(224,168,46,.85)'; c.beginPath(); c.moveTo(markX, GROUND - 46); c.lineTo(markX + 22 + Math.sin(time * 4) * 3, GROUND - 40); c.lineTo(markX, GROUND - 32); c.closePath(); c.fill();
     }
 
+    this.lastControlled = b.controlled;
     const sorted = [...b.units].sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || a.lane - z.lane);
     for (const u of sorted) this.drawUnit(u, b);
 
@@ -135,6 +140,7 @@ export class Renderer {
       c.strokeStyle = `rgba(255,220,170,${0.25 * b.storm})`; c.lineWidth = 1.5;
       if (!low) for (let i = 0; i < 30; i++) { const sx = ((i * 137 + time * 380) % (this.viewW + 100)) - 50, sy = (i * 53) % H; c.beginPath(); c.moveTo(sx, sy); c.lineTo(sx - 30, sy + 4); c.stroke(); }
     }
+    if (!low) this.weather(b.level.region, time);
     if (th.night) { c.fillStyle = 'rgba(20,16,50,.16)'; c.fillRect(0, 0, this.viewW, H); }
     if (b.abilityFx > 0) { c.fillStyle = `rgba(255,220,120,${b.abilityFx * 0.15})`; c.fillRect(0, 0, this.viewW, H); }
     if (b.buff > 0) { c.fillStyle = `rgba(255,120,40,${0.05 + Math.sin(time * 8) * 0.02})`; c.fillRect(0, 0, this.viewW, H); }
@@ -204,6 +210,14 @@ export class Renderer {
     c.beginPath(); c.moveTo(0, GROUND);
     for (let x = -100; x <= vw + 100; x += 24) c.lineTo(x, GROUND - 40 - Math.sin((x - o2) * 0.008) * 22);
     c.lineTo(vw + 100, GROUND); c.closePath(); c.fill();
+    if (region === 'forest' || region === 'tundra' || region === 'graveyard') {
+      for (let i = 0; i < 18; i++) {
+        const x = ((i * 190 + o2) % (W * 0.6) + W * 0.6) % (W * 0.6) - 100;
+        if (x < -80 || x > vw + 80) continue;
+        if (region === 'graveyard') this.deadTree(x, GROUND - 40, i);
+        else this.pine(x, GROUND - 38, i, region === 'tundra');
+      }
+    }
     if (region === 'oasis' || region === 'mountains') {
       for (let i = 0; i < 14; i++) {
         const x = ((i * 260 + o2) % (W * 0.6) + W * 0.6) % (W * 0.6) - 100;
@@ -233,6 +247,45 @@ export class Renderer {
       c.stroke();
     }
     c.fillStyle = '#7a4a20'; c.beginPath(); c.arc(x + 2, y - 92, 3, 0, 7); c.arc(x + 7, y - 91, 3, 0, 7); c.fill();
+  }
+
+  private pine(x: number, y: number, i: number, snow: boolean) {
+    const c = this.ctx;
+    const s = 0.8 + ((i * 37) % 10) / 20;
+    c.fillStyle = '#5a3a22'; c.fillRect(x - 3 * s, y - 12 * s, 6 * s, 14 * s);
+    for (let k = 0; k < 3; k++) {
+      const w = (34 - k * 8) * s, top = y - (14 + k * 22) * s;
+      c.fillStyle = k % 2 ? '#2f6a3a' : '#357a42';
+      c.beginPath(); c.moveTo(x - w, top + 6); c.lineTo(x, top - 30 * s); c.lineTo(x + w, top + 6); c.closePath(); c.fill();
+      if (snow) { c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.moveTo(x - w * 0.5, top - 8 * s); c.lineTo(x, top - 30 * s); c.lineTo(x + w * 0.5, top - 8 * s); c.closePath(); c.fill(); }
+    }
+  }
+
+  private deadTree(x: number, y: number, i: number) {
+    const c = this.ctx;
+    c.strokeStyle = '#2a2420'; c.lineCap = 'round';
+    c.lineWidth = 6; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 4, y - 70); c.stroke();
+    c.lineWidth = 3;
+    for (const [dx, dy, ex, ey] of [[2, -40, -22, -62], [3, -55, 24, -80], [4, -66, -10, -92]]) { c.beginPath(); c.moveTo(x + dx, y + dy); c.lineTo(x + ex, y + ey); c.stroke(); }
+    if (i % 2) { // tombstone
+      c.fillStyle = '#8a8f86'; c.strokeStyle = '#3a3a36'; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(x + 30, y + 30); c.lineTo(x + 30, y + 8); c.arc(x + 40, y + 8, 10, Math.PI, 0); c.lineTo(x + 50, y + 30); c.closePath(); c.fill(); c.stroke();
+      c.beginPath(); c.moveTo(x + 40, y + 6); c.lineTo(x + 40, y + 20); c.moveTo(x + 35, y + 11); c.lineTo(x + 45, y + 11); c.stroke();
+    }
+  }
+
+  private weather(region: RegionId, time: number) {
+    const c = this.ctx;
+    const vw = this.viewW;
+    if (region === 'tundra') {
+      c.fillStyle = 'rgba(255,255,255,.85)';
+      for (let i = 0; i < 60; i++) { const x = ((i * 97 + Math.sin(time + i) * 20 - this.cam * 0.6) % vw + vw) % vw, y = ((i * 61 + time * (30 + (i % 5) * 8)) % H); c.beginPath(); c.arc(x, y, 1.5 + (i % 3) * 0.6, 0, 7); c.fill(); }
+    } else if (region === 'forest') {
+      for (let i = 0; i < 16; i++) { const x = ((i * 151 + Math.sin(time * 0.8 + i) * 40 - this.cam * 0.6) % vw + vw) % vw, y = ((i * 83 + time * (20 + (i % 4) * 6)) % H); c.fillStyle = i % 3 ? '#d98b2b' : '#8fbf3a'; c.save(); c.translate(x, y); c.rotate(time * 2 + i); c.beginPath(); c.ellipse(0, 0, 4, 2, 0, 0, 7); c.fill(); c.restore(); }
+    } else if (region === 'graveyard') {
+      c.fillStyle = 'rgba(190,210,190,.12)';
+      for (let i = 0; i < 6; i++) { const x = ((i * 260 + time * 12 - this.cam * 0.3) % (vw + 300) + vw + 300) % (vw + 300) - 150; c.beginPath(); c.ellipse(x, GROUND - 20 + (i % 3) * 14, 140, 18, 0, 0, 7); c.fill(); }
+    }
   }
 
   private tombProps() {
@@ -274,7 +327,7 @@ export class Renderer {
     const x = CASTLE_X[side];
     const f = side === 0 ? 1 : -1;
     const low = isLowQuality();
-    const wall = region === 'shadow' ? '#7a7290' : region === 'mountains' ? '#b5a588' : region === 'tombs' ? '#bf9d6e' : '#d4a46a';
+    const wall = region === 'shadow' ? '#7a7290' : region === 'mountains' ? '#b5a588' : region === 'tombs' ? '#bf9d6e' : region === 'forest' ? '#a88a62' : region === 'graveyard' ? '#7d7f74' : region === 'tundra' ? '#b8c4cc' : '#d4a46a';
     const light = shadeHex(wall, 0.18), dark = shadeHex(wall, -0.3), deep = shadeHex(wall, -0.55);
     const sink = (1 - pct) * 26;
     const G = GROUND;
@@ -388,7 +441,7 @@ export class Renderer {
       const atk = b.towerShot[side] > 0 ? Math.sin((1 - b.towerShot[side] / 0.3) * Math.PI) : 0;
       for (let k = 0; k < b.towerArchers[side]; k++) {
         const [ax, ay] = posts[k];
-        const a: Unit = { uid: 990 + side * 3 + k, def: UNITS.archer, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
+        const a: Unit = { uid: 990 + side * 3 + k, def: UNITS.archer, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
         c.save(); c.translate(ax, ay); c.scale(0.8, 0.8); c.translate(-ax, -ay - 4);
         drawArt({ c, u: a, x: ax, gy: ay, f, t: time + k, swing: 0, atk, side, region, flash: false, tier: a.tier });
         c.restore();
@@ -466,14 +519,33 @@ export class Renderer {
     const wide = ['camel', 'cavalry', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss', 'elephant', 'cobra', 'cobraqueen'].includes(def.id) ? 1.5 : 1;
     const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
     ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
-    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, tier };
+    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, tier };
     const y = def.flying ? GROUND - 30 : GROUND;
     drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 1, swing: 0, atk: 0, side, region: 'oasis', flash: false, tier });
     return cv.toDataURL();
   }
 
+  showHp = true;
+  lastControlled: Unit | null = null;
   private hpBar(u: Unit, gy: number) {
     const c = this.ctx;
+    if (this.showHp && !u.dead && (!u.def.miner || u.hp < u.maxHp)) {
+      // always-on health readout: small bar + number
+      const w = u.def.boss ? 100 : 34;
+      const y = gy - u.def.height * (1 + (u.tier ?? 0) * 0.035) - 14;
+      const pct = Math.max(0, u.hp) / u.maxHp;
+      c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(u.x - w / 2 - 1, y - 1, w + 2, 6);
+      c.fillStyle = u.side === 0 ? (pct > 0.35 ? '#5cc85c' : '#e8b730') : '#e0453a'; c.fillRect(u.x - w / 2, y, w * pct, 4);
+      c.font = '800 10px system-ui, sans-serif'; c.textAlign = 'center';
+      // number when hurt (and always for bosses / the unit you control) to keep crowds readable
+      if (u.hp < u.maxHp - 0.5 || u.def.boss || u === this.lastControlled) {
+        const txt = String(Math.ceil(Math.max(0, u.hp)));
+        c.fillStyle = 'rgba(0,0,0,.7)'; c.fillText(txt, u.x + 0.8, y - 2.2);
+        c.fillStyle = '#fff'; c.fillText(txt, u.x, y - 3);
+      }
+      if (u.rank) { c.fillStyle = '#ffe066'; c.font = '900 11px system-ui'; c.fillText('★'.repeat(u.rank), u.x, y - 14); }
+      return;
+    }
     if (u.rank && !u.dead) { c.fillStyle = '#ffe066'; c.font = '900 12px system-ui'; c.textAlign = 'center'; c.fillText('★'.repeat(u.rank), u.x, gy - u.def.height - 20); }
     if (u.dead || u.hp >= u.maxHp) return;
     const w = u.def.boss ? 100 : 32;

@@ -4,14 +4,19 @@ import type { EnemyId, UnitId } from './units';
 export const ENEMY_COST: Partial<Record<EnemyId, number>> = {
   miner: 50, sword: 75, bandit: 70, archer: 150, spear: 250, sandmage: 180, camel: 400, cavalry: 350, crossbow: 280, golem: 450, ghost: 200,
   catapult: 600, hyena: 60, vulture: 90, fire: 300, lion: 320, assassin: 350, giant: 700, mummy: 260, skeleton: 80, cobra: 160, boss: 0,
+  elfworker: 50, elfarcher: 160, bladedancer: 180, druid: 200, treant: 520, elkrider: 380,
+  wisp: 50, wraith: 150, banshee: 200, specter: 300, phantom: 220,
+  gravedigger: 50, zombie: 50, runner: 70, bloater: 150, skelarcher: 120, abomination: 520, necromancer: 260,
+  dwarfminer: 60, axethrower: 170, shieldwall: 260, berserker: 220, cannon: 600, gyrocopter: 280,
+  goblin: 50, goblinspear: 70, ogre: 380, troll: 340, cyclops: 560, frostgiant: 820,
 };
 export const costOf = (u: EnemyId) => ENEMY_COST[u] ?? 200;
 
-export type RegionId = 'oasis' | 'dunes' | 'mountains' | 'shadow' | 'tombs';
+export type RegionId = 'oasis' | 'dunes' | 'mountains' | 'shadow' | 'tombs' | 'forest' | 'graveyard' | 'tundra';
 
 export interface Wave { t: number; unit: EnemyId; count: number; mult?: number; }
 
-export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily';
+export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily' | 'conquest';
 
 /** Battle-rule modifiers (challenges and the daily challenge). */
 export interface Mods {
@@ -28,6 +33,7 @@ export interface EnemyAI {
   maxMiners: number;
   income: number; // mining-rate multiplier
   graceTime: number; // seconds before its first attack
+  miner?: EnemyId; // the faction's worker unit (default 'miner')
 }
 
 export interface LevelDef {
@@ -48,6 +54,7 @@ export interface LevelDef {
   ai?: EnemyAI; // economic enemy (campaign/daily); absent = scripted waves only
   winAfter?: number; // survive this many seconds to win (siege challenge)
   towerDmg?: number; // enemy fort archer strength (0 = no tower)
+  enemyColor?: string; // faction colour for the enemy fort and banners
 }
 
 export const REGIONS: { id: RegionId; from: number; to: number; enemy: EnemyId }[] = [
@@ -62,7 +69,7 @@ export const LEVEL_COUNT = 50;
 export const regionOf = (i: number): RegionId => REGIONS.find((r) => i >= r.from && i <= r.to)!.id;
 
 /** Per-level difficulty factors produced by scripts/tune.ts (1 = untuned). */
-export const TUNE: number[] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.6, 2.8, 3.02, 2.68, 2.54, 2.52, 2.52, 2.36, 1.81, 2.0, 2.0, 1.98, 2.0, 1.99, 1.87, 1.87, 1.85, 1.79, 1.47, 1.68, 1.65, 1.62, 1.66, 1.66, 1.66, 1.53, 1.53, 1.5, 1.24, 1.53, 1.5, 1.53, 1.55, 1.46, 1.42, 1.44, 1.4, 1.44, 0.64];
+export const TUNE: number[] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.6, 2.8, 3.47, 3.08, 2.92, 2.9, 2.9, 2.71, 2.08, 2.3, 2.3, 2.28, 2.3, 2.29, 2.15, 2.15, 2.13, 2.06, 1.69, 1.93, 1.9, 1.86, 1.91, 1.91, 1.91, 1.76, 1.76, 1.72, 1.43, 1.76, 1.72, 1.76, 1.78, 1.68, 1.63, 1.66, 1.61, 1.66, 0.74];
 
 export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef {
   const region = regionOf(index);

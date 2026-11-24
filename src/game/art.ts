@@ -14,6 +14,30 @@ export interface ArtCtx { c: C; u: Unit; x: number; gy: number; f: number; t: nu
 
 /** Armour metal by visual tier (a new look every 5 upgrade levels). */
 const METAL = ['', '#c98a4a', '#d5dde5', '#ffcf3d', '#ffe27a'];
+let BLADE = '#e6ecf2'; // set per unit: gold blades from tier 3
+/** Player soldiers that wear tier helmets (robed casters and beasts don't). */
+const HELMETED = new Set(['sword', 'archer', 'spear', 'crossbow', 'drummer', 'fire', 'giant', 'hero', 'camel', 'cavalry', 'elephant', 'miner']);
+function helmet(c: C, hx: number, hy: number, r: number, tier: number, f: number, t: number) {
+  const m = METAL[tier];
+  if (tier === 1) { // bronze cap
+    c.beginPath(); c.arc(hx, hy - r * 0.15, r * 1.04, Math.PI * 1.05, Math.PI * 1.95); c.closePath(); fillStroke(c, vgrad(c, m, hy - r * 1.2, hy), 1.8);
+    c.fillStyle = shade(m, -0.3); c.fillRect(hx - r * 1.02, hy - r * 0.35, r * 2.04, r * 0.18);
+  } else if (tier === 2) { // silver helmet with nose guard and neck guard
+    c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.08, Math.PI, 0); c.lineTo(hx - f * r * 1.08, hy + r * 0.55); c.lineTo(hx - f * r * 0.7, hy + r * 0.2); c.closePath(); fillStroke(c, vgrad(c, m, hy - r * 1.2, hy + r * 0.5), 1.8);
+    c.fillStyle = shade(m, -0.25); c.fillRect(hx + f * r * 0.25 - 1.5, hy - r * 0.15, 3, r * 0.65);
+    poly(c, [hx - 2, hy - r * 1.15, hx, hy - r * 1.55, hx + 2, hy - r * 1.15], m, 1.2);
+  } else { // gold helmet with tall crest; tier 4 adds wings
+    c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.1, Math.PI, 0); c.lineTo(hx - f * r * 1.1, hy + r * 0.6); c.lineTo(hx - f * r * 0.6, hy + r * 0.25); c.closePath(); fillStroke(c, vgrad(c, m, hy - r * 1.2, hy + r * 0.5), 1.8);
+    c.fillStyle = '#c0392b'; c.beginPath(); c.moveTo(hx + f * r * 0.4, hy - r * 1.05); c.quadraticCurveTo(hx - f * r * 0.6, hy - r * 2.1, hx - f * r * 1.9, hy - r * 1.3 + Math.sin(t * 5) * 2); c.quadraticCurveTo(hx - f * r * 0.5, hy - r * 1.4, hx - f * r * 0.4, hy - r * 0.95); c.closePath(); c.fill(); c.strokeStyle = OUT; c.lineWidth = 1.2; c.stroke();
+    if (tier >= 4) for (const sd of [-1, 1]) poly(c, [hx + sd * r * 0.95, hy - r * 0.3, hx + sd * r * 1.9, hy - r * 1.3, hx + sd * r * 1.55, hy - r * 0.55, hx + sd * r * 2.1, hy - r * 0.8, hx + sd * r * 1.1, hy], '#fffaf0', 1.4);
+  }
+}
+/** Outfit colour by tier: richer cloth as a soldier rises. */
+function tierCloth(cloth: string, tier: number, side: number) {
+  if (!tier || !cloth.startsWith('#')) return cloth;
+  if (side === 1) return shade(cloth, -0.08 * tier);
+  return ['', cloth, shade(cloth, -0.1), '#f7dc8a', '#fbf3dc'][tier];
+}
 
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
@@ -89,6 +113,7 @@ interface HumanOpts {
   back?: (sx: number, sy: number) => void; // behind body (cape, quiver, shield arm)
   armAng?: number; // front arm angle override
   angry?: boolean; glowEyes?: string; noLegs?: boolean; mask?: string;
+  face?: (hx: number, hy: number, r: number) => void; // replaces the default eyes + mouth
 }
 function human(a: ArtCtx, h: number, o: HumanOpts) {
   const { c, x, gy, f, swing } = a;
@@ -100,6 +125,9 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   const bob = a.u.moving ? Math.abs(Math.sin(a.u.anim)) * 2 : Math.sin(a.t * 2.4 + a.u.uid) * 0.8; // walk bounce / idle breathing
   c.strokeStyle = OUT; c.lineJoin = 'round'; c.lineCap = 'round';
   const tier = a.tier ?? 0;
+  const helmeted = tier >= 1 && HELMETED.has(a.u.def.id) && a.side === 0;
+  if (helmeted) o = { ...o, cloth: tierCloth(o.cloth, tier, a.side), trim: tier >= 3 ? '#c9952a' : o.trim };
+  BLADE = tier >= 3 ? '#ffe27a' : tier === 2 ? '#f6fafd' : '#e6ecf2';
   if (tier >= 2 && !o.noLegs) { // flowing cape
     const capeCol = tier >= 3 ? '#8e1b1b' : shade(o.cloth, -0.3);
     poly(c, [x - R * 0.7, neck - bob, x + R * 0.5, neck - bob, x - f * (R * 1.6) + Math.sin(a.t * 3 + a.u.uid) * 2, gy - h * 0.08, x - f * R * 0.4, gy - h * 0.12], capeCol, 1.8);
@@ -135,14 +163,16 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   // head
   circle(c, x, headY - bob, R, o.skin);
   if (o.mask) { c.save(); c.beginPath(); c.arc(x, headY - bob, R - 1.2, 0.15, Math.PI - 0.15); c.closePath(); c.fillStyle = o.mask; c.fill(); c.restore(); }
-  eyes(c, x, headY - bob - R * 0.05, R, f, !!o.angry, o.glowEyes);
-  if (!o.glowEyes && !o.mask) { c.fillStyle = 'rgba(230,110,90,.28)'; c.beginPath(); c.arc(x + f * R * 0.62, headY - bob + R * 0.3, R * 0.16, 0, 7); c.fill(); }
-  if (!o.mask && !o.glowEyes) { c.strokeStyle = OUT; c.lineWidth = 2; c.beginPath(); c.arc(x + f * R * 0.38, headY - bob + R * 0.42, R * 0.18, o.angry ? Math.PI + 0.4 : 0.3, o.angry ? -0.4 : Math.PI - 0.3); c.stroke(); }
+  if (o.face) o.face(x, headY - bob, R);
+  else eyes(c, x, headY - bob - R * 0.05, R, f, !!o.angry, o.glowEyes);
+  if (!o.face && !o.glowEyes && !o.mask) { c.fillStyle = 'rgba(230,110,90,.28)'; c.beginPath(); c.arc(x + f * R * 0.62, headY - bob + R * 0.3, R * 0.16, 0, 7); c.fill(); }
+  if (!o.face && !o.mask && !o.glowEyes) { c.strokeStyle = OUT; c.lineWidth = 2; c.beginPath(); c.arc(x + f * R * 0.38, headY - bob + R * 0.42, R * 0.18, o.angry ? Math.PI + 0.4 : 0.3, o.angry ? -0.4 : Math.PI - 0.3); c.stroke(); }
   o.head?.(x, headY - bob, R);
   if (tier >= 1 && !o.noLegs) {
     for (const sx of [x - f * R * 0.55, x + f * R * 0.55]) ellipse(c, sx, neck + 4 - bob, R * 0.42, R * 0.26, METAL[tier], 0, 1.6);
   }
-  if (tier >= 3) { // plume
+  if (helmeted) helmet(c, x, headY - bob, R, tier, f, a.t);
+  else if (tier >= 3) { // plume
     c.save(); c.strokeStyle = tier >= 4 ? '#ff4d4d' : a.side ? '#3a3a44' : '#c0392b'; c.lineWidth = R * 0.32; c.lineCap = 'round';
     c.beginPath(); c.moveTo(x, headY - bob - R * 0.95); c.quadraticCurveTo(x - f * R * 0.9, headY - bob - R * 1.9, x - f * R * 1.7, headY - bob - R * 1.1); c.stroke(); c.restore();
   }
@@ -152,7 +182,10 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   const al = h * 0.24;
   const hx = sx + Math.cos(ang) * al, hy = sy + Math.sin(ang) * al;
   line(c, sx, sy, hx, hy, o.skin, Math.max(3, h * 0.065));
-  o.weapon?.(hx, hy, ang);
+  if (o.weapon) {
+    const ws = 1 + tier * 0.1; // bigger weapons as the soldier rises
+    if (ws !== 1) { c.save(); c.translate(hx, hy); c.scale(ws, ws); c.translate(-hx, -hy); o.weapon(hx, hy, ang); c.restore(); } else o.weapon(hx, hy, ang);
+  }
   if (tier >= 3 && o.weapon) glowDot(c, hx + Math.cos(ang - f * 1.1) * h * 0.3, hy + Math.sin(ang - f * 1.1) * h * 0.3, 2.5 + Math.sin(a.t * 6) * 0.8, '#fff3b0');
   circle(c, hx, hy, Math.max(2.5, h * 0.045), o.skin, 2);
 }
@@ -166,7 +199,7 @@ const scimitar = (c: C, f: number, len: number) => (hx: number, hy: number, ang:
   const bang = ang - f * 1.1;
   c.save(); c.translate(hx, hy); c.rotate(bang);
   c.beginPath(); c.moveTo(0, -2); c.quadraticCurveTo(len * 0.6, -len * 0.18 * f, len, -len * 0.05 * f); c.quadraticCurveTo(len * 0.55, len * 0.05 * f, 0, 3); c.closePath();
-  fillStroke(c, '#e6ecf2', 2); c.fillStyle = '#b5791f'; c.fillRect(-3, -5, 5, 10); c.restore();
+  fillStroke(c, BLADE, 2); c.fillStyle = '#b5791f'; c.fillRect(-3, -5, 5, 10); c.restore();
 };
 
 // ---------------- Beasts ----------------
@@ -475,6 +508,127 @@ function drawArtInner(a: ArtCtx) {
       c.restore();
       return bird(a, gy - 10, h, '#ff7a2d', '#e0451f', { crest: '#ffd34d', beak: '#ffe08a' });
     }
+    // ================= Civilizations =================
+    // --- Elves ---
+    case 'elfworker': return human(a, h, { skin: '#f2d2b0', cloth: '#6f8f4a', trim: '#d9c36a', head: (hx, hy, r) => elfEars(c, hx, hy, r, f, '#f2d2b0'),
+      armAng: f > 0 ? lerp(-1.4, 0.4, a.atk) : Math.PI - lerp(-1.4, 0.4, a.atk), weapon: (hx, hy, ang) => { const ex = hx + Math.cos(ang) * h * 0.3, ey = hy + Math.sin(ang) * h * 0.3; line(c, hx, hy, ex, ey, '#8b5a2b', 3); c.save(); c.strokeStyle = '#cfd6dc'; c.lineWidth = 3; c.beginPath(); c.arc(ex, ey, 7, ang - 2.2, ang - 0.4); c.stroke(); c.restore(); } });
+    case 'elfarcher': return human(a, h, { skin: '#f2d2b0', cloth: '#2f8f4e', trim: '#d9c36a',
+      head: (hx, hy, r) => { elfEars(c, hx, hy, r, f, '#f2d2b0'); c.beginPath(); c.arc(hx, hy, r * 1.12, Math.PI * 1.02, Math.PI * 1.98); c.lineTo(hx - f * r * 1.5, hy + r * 0.3); c.closePath(); fillStroke(c, '#246b3b'); },
+      armAng: f > 0 ? -0.18 : Math.PI + 0.18, weapon: (hx, hy) => bow(c, hx, hy, h * 0.34, f, a.atk, '#a8742c') });
+    case 'bladedancer': return human(a, h, { skin: '#f2d2b0', cloth: '#1f8a8a', trim: '#e6c35c',
+      head: (hx, hy, r) => { elfEars(c, hx, hy, r, f, '#f2d2b0'); c.save(); c.strokeStyle = '#e8e0c8'; c.lineWidth = r * 0.5; c.lineCap = 'round'; c.beginPath(); c.moveTo(hx - f * r * 0.4, hy - r * 0.8); c.quadraticCurveTo(hx - f * r * 2, hy - r * 0.6 + Math.sin(a.t * 6) * 3, hx - f * r * 2.2, hy + r * 0.8); c.stroke(); c.restore(); },
+      weapon: scimitar(c, f, h * 0.36), back: (sx, sy) => line(c, sx, sy + 6, sx - f * 16, sy + 20, '#e6ecf2', 2.5) });
+    case 'druid': return human(a, h, { skin: '#f2d2b0', cloth: '#6b4f2a', trim: '#7fbf4a', robe: true,
+      head: (hx, hy, r) => { elfEars(c, hx, hy, r, f, '#f2d2b0'); for (const sd of [-1, 1]) { c.save(); c.strokeStyle = '#8b6a3a'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(hx + sd * r * 0.5, hy - r * 0.8); c.lineTo(hx + sd * r * 1.1, hy - r * 1.8); c.moveTo(hx + sd * r * 0.85, hy - r * 1.3); c.lineTo(hx + sd * r * 1.5, hy - r * 1.5); c.stroke(); c.restore(); } },
+      armAng: f > 0 ? -1.1 : Math.PI + 1.1, weapon: (hx, hy) => { line(c, hx, hy - 10, hx, hy + h * 0.55, '#6b4423', 3); glowDot(c, hx, hy - 14, 5 + a.atk * 3, '#7dff9a'); } });
+    case 'treant': return treant(a, h);
+    case 'elkrider': return elkRider(a);
+    case 'elfqueen': return human(a, h, { skin: '#f6e0c8', cloth: '#e8f0e0', trim: '#2f8f4e', robe: true,
+      head: (hx, hy, r) => { elfEars(c, hx, hy, r, f, '#f6e0c8'); c.save(); c.strokeStyle = '#f2e6a8'; c.lineWidth = r * 0.45; c.beginPath(); c.moveTo(hx, hy - r); c.quadraticCurveTo(hx - f * r * 2, hy, hx - f * r * 1.6, hy + r * 2.2); c.stroke(); c.restore(); for (let i = -2; i <= 2; i++) { c.fillStyle = '#3fae5a'; c.beginPath(); c.ellipse(hx + i * r * 0.4, hy - r * 1.05, r * 0.18, r * 0.35, i * 0.3, 0, 7); c.fill(); } },
+      armAng: f > 0 ? -0.8 - a.atk * 0.5 : Math.PI + 0.8 + a.atk * 0.5, weapon: (hx, hy) => { line(c, hx, hy, hx, hy + h * 0.6, '#d9c36a', 3); glowDot(c, hx, hy - 6, 7 + a.atk * 4, '#8fff9a', '#f0fff0'); } });
+    // --- Ghosts ---
+    case 'wisp': { const y = gy - 22 + Math.sin(t * 3 + a.u.uid) * 4; smokeTail(c, x, y, gy - 4, f, '#9fd8ff', t); glowDot(c, x, y, 11, '#9fd8ff', '#ffffff'); eyes(c, x - f * 2, y - 2, 9, f, false, '#1b3a5a'); return; }
+    case 'wraith': c.save(); c.globalAlpha *= 0.85; smokeTail(c, x, gy - h * 0.4, gy + 6, f, '#4a3a6a', t);
+      human(a, h, { skin: '#2a2238', cloth: '#3a2f52', trim: '#7a5fb0', noLegs: true, glowEyes: '#b48cff',
+        head: (hx, hy, r) => { c.beginPath(); c.arc(hx, hy, r * 1.15, Math.PI * 0.9, Math.PI * 2.1); c.lineTo(hx + r, hy + r * 0.9); c.lineTo(hx - r, hy + r * 0.9); c.closePath(); fillStroke(c, '#2c2440'); eyes(c, hx, hy, r, f, true, '#c9a6ff'); },
+        weapon: (hx, hy, ang) => { const b2 = ang - f * 0.6; const ex = hx + Math.cos(b2) * h * 0.5, ey = hy + Math.sin(b2) * h * 0.5; line(c, hx, hy, ex, ey, '#3a2f2a', 2.5); c.save(); c.strokeStyle = '#cfd6e6'; c.lineWidth = 3; c.beginPath(); c.arc(ex, ey + 10, 14, -Math.PI / 2 - f * 0.2, f > 0 ? 0.5 : Math.PI - 0.5, f < 0); c.stroke(); c.restore(); } });
+      c.restore(); return;
+    case 'banshee': c.save(); c.globalAlpha *= 0.82; smokeTail(c, x, gy - h * 0.45, gy, f, '#cfe0ff', t);
+      human(a, h, { skin: '#dfe8ff', cloth: '#a8b8e8', trim: '#6c4bb4', noLegs: true,
+        head: (hx, hy, r) => { c.save(); c.strokeStyle = '#eef2ff'; c.lineWidth = r * 0.5; for (const sd of [-0.6, 0.6]) { c.beginPath(); c.moveTo(hx + sd * r, hy - r * 0.6); c.quadraticCurveTo(hx + sd * r * 1.8 - f * r, hy + r, hx + sd * r * 1.3 - f * r * 1.4 + Math.sin(a.t * 4) * 3, hy + r * 2.4); c.stroke(); } c.restore(); },
+        face: (hx, hy, r) => { eyes(c, hx, hy - r * 0.1, r, f, true, '#6c4bb4'); c.fillStyle = '#2a1a40'; c.beginPath(); c.ellipse(hx + f * r * 0.35, hy + r * 0.45, r * 0.18, r * (0.2 + a.atk * 0.25), 0, 0, 7); c.fill(); },
+        armAng: f > 0 ? -0.4 : Math.PI + 0.4 });
+      if (a.atk > 0.3) { c.strokeStyle = 'rgba(200,180,255,.5)'; c.lineWidth = 2; for (let k = 1; k <= 3; k++) { c.beginPath(); c.arc(x + f * 10, gy - h * 0.82, 8 * k, f > 0 ? -0.6 : Math.PI - 0.6, f > 0 ? 0.6 : Math.PI + 0.6); c.stroke(); } }
+      c.restore(); return;
+    case 'specter': c.save(); c.globalAlpha *= 0.8;
+      human(a, h, { skin: '#cfe0f4', cloth: '#7a8fb8', trim: '#3a4a8a', glowEyes: '#7df9ff', angry: true,
+        head: (hx, hy, r) => { c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.08, Math.PI, 0); c.closePath(); fillStroke(c, '#8fa0c0'); c.fillStyle = '#1e2a4a'; c.fillRect(hx - r, hy - r * 0.2, r * 2, r * 0.2); },
+        weapon: scimitar(c, f, h * 0.42), back: (sx, sy) => ellipse(c, sx + f * h * 0.3, sy + h * 0.25, h * 0.12, h * 0.2, '#5a6a9a', 0, 2) });
+      c.restore(); return;
+    case 'phantom': c.save(); c.globalAlpha *= 0.85;
+      human(a, h, { skin: '#3a3450', cloth: '#26213a', trim: '#b48cff', mask: '#14101f', glowEyes: '#ff5c8a',
+        head: (hx, hy, r) => { c.beginPath(); c.arc(hx, hy, r * 1.1, Math.PI * 0.95, Math.PI * 2.05); c.lineTo(hx - f * r * 1.4, hy + r * 0.2); c.closePath(); fillStroke(c, '#1e1a2e'); },
+        weapon: (hx, hy, ang) => { const b2 = ang - f * 0.9; line(c, hx, hy, hx + Math.cos(b2) * h * 0.28, hy + Math.sin(b2) * h * 0.28, '#d8c8ff', 2.5); } });
+      c.restore(); return;
+    case 'ghostking': c.save(); c.globalAlpha *= 0.85; smokeTail(c, x, gy - h * 0.45, gy, f, '#b8a8ff', t);
+      human(a, h, { skin: '#e0e6ff', cloth: '#4a3a8a', trim: '#ffd34d', noLegs: true, glowEyes: '#7df9ff', head: (hx, hy, r) => crownAt(c, hx, hy - r * 0.85, r * 0.7), weapon: scimitar(c, f, h * 0.5) });
+      c.restore(); return;
+    // --- Zombies ---
+    case 'gravedigger': return human(a, h, { ...zombieLook(c, f, '#6a5a44'), armAng: f > 0 ? lerp(-1.3, 0.5, a.atk) : Math.PI - lerp(-1.3, 0.5, a.atk),
+      weapon: (hx, hy, ang) => { const ex = hx + Math.cos(ang) * h * 0.38, ey = hy + Math.sin(ang) * h * 0.38; line(c, hx, hy, ex, ey, '#6b4423', 3); poly(c, [ex - 5, ey - 2, ex + 5, ey - 2, ex + 4, ey + 9, ex - 4, ey + 9], '#8a8f96', 1.5); } });
+    case 'zombie': return human(a, h, { ...zombieLook(c, f, '#5a6a8a'), armAng: f > 0 ? -0.15 + a.atk * 0.3 : Math.PI + 0.15 - a.atk * 0.3 });
+    case 'runner': { c.save(); c.translate(x, gy); c.rotate(f * 0.18); c.translate(-x, -gy); human(a, h, { ...zombieLook(c, f, '#8a3a2a'), armAng: f > 0 ? 0.3 : Math.PI - 0.3 }); c.restore(); return; }
+    case 'bloater': human(a, h, { ...zombieLook(c, f, '#4a5a3a'), armAng: f > 0 ? 0.2 : Math.PI - 0.2 });
+      ellipse(c, x + f * 4, gy - h * 0.45, h * 0.26, h * 0.24, '#9fbf5a');
+      c.fillStyle = '#c6e070'; for (const [dx, dy] of [[-6, -6], [6, 4], [-2, 8], [8, -10]]) { c.beginPath(); c.arc(x + f * 4 + dx, gy - h * 0.45 + dy, 3, 0, 7); c.fill(); }
+      return;
+    case 'skelarcher': return skeleton(a, h, true);
+    case 'abomination': return human(a, h, { ...zombieLook(c, f, '#6a5040'), skin: '#b8c9a0',
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.7; const ex = hx + Math.cos(b2) * h * 0.4, ey = hy + Math.sin(b2) * h * 0.4; line(c, hx, hy, ex, ey, '#5a3a2a', 4); c.save(); c.strokeStyle = '#9aa3ad'; c.lineWidth = 4; c.beginPath(); c.arc(ex + f * 6, ey, 9, -Math.PI / 2, Math.PI / 2, f < 0); c.stroke(); c.restore(); },
+      head: (hx, hy, r) => { c.save(); c.strokeStyle = '#3a2a1a'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(hx - r * 0.8, hy - r * 0.3); c.lineTo(hx + r * 0.6, hy + r * 0.4); for (let k = -3; k <= 3; k++) { const px = hx - r * 0.1 + k * r * 0.2, py = hy + k * r * 0.1; c.moveTo(px - 2, py - 3); c.lineTo(px + 2, py + 3); } c.stroke(); c.restore(); } });
+    case 'necromancer': return human(a, h, { skin: '#c8d0b0', cloth: '#1e1a24', trim: '#7a3fb0', robe: true, glowEyes: '#7dff5c',
+      head: (hx, hy, r) => { c.beginPath(); c.arc(hx, hy, r * 1.15, Math.PI * 0.95, Math.PI * 2.05); c.lineTo(hx + r * 1.1, hy + r * 0.9); c.lineTo(hx - r * 1.1, hy + r * 0.9); c.closePath(); fillStroke(c, '#16121c'); eyes(c, hx, hy, r, f, true, '#7dff5c'); },
+      armAng: f > 0 ? -1 + a.atk * 0.5 : Math.PI + 1 - a.atk * 0.5,
+      weapon: (hx, hy) => { line(c, hx, hy - 6, hx, hy + h * 0.55, '#3a2a1a', 3); circle(c, hx, hy - 12, 6, '#ece6d6', 1.5); c.fillStyle = '#1b1b1b'; c.fillRect(hx - 3, hy - 13, 2, 2); c.fillRect(hx + 1, hy - 13, 2, 2); glowDot(c, hx, hy - 12, 3 + a.atk * 3, '#7dff5c'); } });
+    case 'plaguelord': return human(a, h, { ...zombieLook(c, f, '#3a2a3a'), skin: '#8a9f6a', angry: true,
+      head: (hx, hy, r) => crownAt(c, hx, hy - r * 0.9, r * 0.6),
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.7; const ex = hx + Math.cos(b2) * h * 0.45, ey = hy + Math.sin(b2) * h * 0.45; line(c, hx, hy, ex, ey, '#3a2a1a', 4); circle(c, ex, ey + 12, h * 0.07, '#5a5f66', 2); } });
+    // --- Dwarves ---
+    case 'dwarfminer': return human(a, h, { ...dwarfLook(c, f, '#7a5a3a', '#c97a3a'),
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#c97a3a'); c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.05, Math.PI, 0); c.closePath(); fillStroke(c, '#c9a24a'); glowDot(c, hx + f * r * 0.3, hy - r * 0.75, 3, '#fff3a0'); },
+      armAng: f > 0 ? lerp(-1.4, 0.4, a.atk) : Math.PI - lerp(-1.4, 0.4, a.atk),
+      weapon: (hx, hy, ang) => { const ex = hx + Math.cos(ang) * h * 0.4, ey = hy + Math.sin(ang) * h * 0.4; line(c, hx, hy, ex, ey, '#8b5a2b', 3); const px = Math.cos(ang + Math.PI / 2) * 9, py = Math.sin(ang + Math.PI / 2) * 9; line(c, ex - px, ey - py, ex + px, ey + py, '#9aa3ad', 3); } });
+    case 'axethrower': return human(a, h, { ...dwarfLook(c, f, '#3f6fa8', '#8a5a2a'),
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#8a5a2a'); c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.05, Math.PI, 0); c.closePath(); fillStroke(c, '#9aa6b2'); for (const sd of [-1, 1]) poly(c, [hx + sd * r * 0.8, hy - r * 0.4, hx + sd * r * 1.6, hy - r * 1.4, hx + sd * r * 1.1, hy - r * 0.6], '#efe6d2', 1.5); },
+      armAng: f > 0 ? lerp(-1.5, 0.2, a.atk) : Math.PI - lerp(-1.5, 0.2, a.atk), weapon: (hx, hy, ang) => axe(c, hx, hy, ang, h * 0.3, f) });
+    case 'shieldwall': return human(a, h, { ...dwarfLook(c, f, '#4a5a6a', '#a8742c'),
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#a8742c'); c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.08, Math.PI, 0); c.closePath(); fillStroke(c, '#b8c2cc'); c.fillStyle = '#8a95a0'; c.fillRect(hx - 1.5, hy - r * 0.2, 3, r * 0.7); },
+      armAng: f > 0 ? 0.1 : Math.PI - 0.1,
+      weapon: (hx, hy) => { c.beginPath(); c.roundRect(a.x + f * h * 0.12 - h * 0.17, gy - h * 0.82, h * 0.34, h * 0.7, 5); fillStroke(c, vgrad(c, '#3f6fa8', gy - h * 0.82, gy - h * 0.12), 2.5); circle(c, a.x + f * h * 0.12, gy - h * 0.47, h * 0.07, '#c9a24a', 1.5); void hx; void hy; } });
+    case 'berserker': return human(a, h, { ...dwarfLook(c, f, '#8a3a2a', '#d0461f'), skin: '#e8a882', angry: true,
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#d0461f'); c.save(); c.strokeStyle = '#d0461f'; c.lineWidth = r * 0.5; c.beginPath(); c.moveTo(hx - r * 0.3, hy - r * 0.9); c.lineTo(hx + r * 0.3, hy - r * 1.3); c.stroke(); c.restore(); },
+      weapon: (hx, hy, ang) => axe(c, hx, hy, ang - f * 0.6, h * 0.36, f), back: (sx, sy) => axe(c, sx, sy + 10, Math.PI / 2 + f * 0.6, h * 0.3, -f) });
+    case 'cannon': { c.beginPath(); c.roundRect(x - 26, gy - 20, 52, 10, 3); fillStroke(c, '#5a4030');
+      for (const dx of [-18, 18]) { circle(c, x + dx, gy - 9, 9, '#4a3020'); }
+      const rec = a.atk * 6;
+      c.save(); c.translate(x - f * rec, gy - 30); c.rotate(-f * 0.25); c.beginPath(); c.roundRect(-14, -8, 44 * 1, 16, 6); c.restore();
+      c.save(); c.translate(x - f * rec, gy - 30); c.scale(f, 1); c.rotate(-0.25); c.beginPath(); c.roundRect(-14, -8, 44, 16, 6); fillStroke(c, vgrad(c, '#4a4f56', -8, 8), 2.5); c.fillStyle = '#1b1b1b'; c.beginPath(); c.arc(30, 0, 5, 0, 7); c.fill(); c.restore();
+      if (a.atk > 0.6) glowDot(c, x + f * 34, gy - 40, 7, '#ffb347');
+      const gunner: ArtCtx = { ...a, x: x - f * 30 };
+      human(gunner, 40, { ...dwarfLook(c, f, '#3f6fa8', '#8a5a2a'), head: (hx, hy, r) => beard(c, hx, hy, r, f, '#8a5a2a') }); return; }
+    case 'gyrocopter': { const y = gy - 6;
+      c.save(); c.strokeStyle = OUT; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y - 22); c.lineTo(x, y - 30); c.stroke(); c.restore();
+      const sp = Math.sin(t * 40) * 30;
+      c.save(); c.globalAlpha *= 0.7; c.fillStyle = '#cfd6dc'; c.beginPath(); c.ellipse(x, y - 31, Math.abs(sp) + 6, 2.5, 0, 0, 7); c.fill(); c.restore();
+      ellipse(c, x, y - 10, 20, 11, '#c9a24a'); poly(c, [x - f * 18, y - 12, x - f * 34, y - 18, x - f * 34, y - 6], '#a8742c', 2);
+      c.fillStyle = '#9fd8ff'; c.beginPath(); c.arc(x + f * 8, y - 14, 6, 0, 7); c.fill();
+      beard(c, x + f * 2, y - 18, 7, f, '#8a5a2a'); circle(c, x + f * 2, y - 22, 6, '#e6b48a', 1.5);
+      line(c, x + f * 14, y - 6, x + f * 26, y - 6, '#4a4f56', 3); return; }
+    case 'dwarfking': return human(a, h, { ...dwarfLook(c, f, '#7a1f3a', '#e8e0d0'), angry: true,
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#e8e0d0', true); crownAt(c, hx, hy - r * 0.9, r * 0.65); },
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.8; const ex = hx + Math.cos(b2) * h * 0.5, ey = hy + Math.sin(b2) * h * 0.5; line(c, hx, hy, ex, ey, '#6b4423', 4); c.save(); c.translate(ex, ey); c.rotate(b2); c.beginPath(); c.roundRect(-8, -12, 16, 24, 3); fillStroke(c, vgrad(c, '#b8c2cc', -12, 12), 2.5); c.restore(); } });
+    // --- Giants ---
+    case 'goblin': return human(a, h, { ...goblinLook(c, f), armAng: f > 0 ? lerp(-1.4, 0.4, a.atk) : Math.PI - lerp(-1.4, 0.4, a.atk),
+      weapon: (hx, hy, ang) => { const ex = hx + Math.cos(ang) * h * 0.3, ey = hy + Math.sin(ang) * h * 0.3; line(c, hx, hy, ex, ey, '#8b5a2b', 3); line(c, ex - 6, ey - 3, ex + 6, ey + 3, '#9aa3ad', 3); } });
+    case 'goblinspear': return human(a, h, { ...goblinLook(c, f), armAng: f > 0 ? 0.05 : Math.PI - 0.05,
+      weapon: (hx, hy) => { const push = a.atk * 8 * f; line(c, hx - f * 16 + push, hy, hx + f * 34 + push, hy, '#8b5a2b', 2.5); poly(c, [hx + f * 34 + push, hy - 4, hx + f * 44 + push, hy, hx + f * 34 + push, hy + 4], '#cfd6dc', 1.5); } });
+    case 'ogre': return human(a, h, { skin: '#a8b06a', cloth: '#6b4a2a', trim: '#3a2a1a', angry: true,
+      face: (hx, hy, r) => { eyes(c, hx, hy - r * 0.15, r, f, true); c.fillStyle = '#f4ecd8'; poly(c, [hx + f * r * 0.15, hy + r * 0.45, hx + f * r * 0.25, hy + r * 0.15, hx + f * r * 0.35, hy + r * 0.45], '#f4ecd8', 1); poly(c, [hx + f * r * 0.55, hy + r * 0.45, hx + f * r * 0.65, hy + r * 0.15, hx + f * r * 0.75, hy + r * 0.45], '#f4ecd8', 1); },
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.8; const ex = hx + Math.cos(b2) * h * 0.48, ey = hy + Math.sin(b2) * h * 0.48; line(c, hx, hy, ex, ey, '#7a4f28', 8); circle(c, ex, ey, h * 0.09, '#6b4423', 2.5); } });
+    case 'troll': return human(a, h, { skin: '#7a9aa8', cloth: '#4a3a2a', trim: '#2a1a10', angry: true,
+      head: (hx, hy, r) => { c.save(); c.strokeStyle = '#3a4a3a'; c.lineWidth = r * 0.25; for (let k = -2; k <= 2; k++) { c.beginPath(); c.moveTo(hx + k * r * 0.25, hy - r * 0.9); c.lineTo(hx + k * r * 0.35 - f * r * 0.4, hy - r * 1.6); c.stroke(); } c.restore(); },
+      face: (hx, hy, r) => { eyes(c, hx, hy - r * 0.1, r, f, true, '#ffcf3d'); for (const k of [0.15, 0.65]) poly(c, [hx + f * r * (k - 0.08), hy + r * 0.5, hx + f * r * k, hy + r * 0.05, hx + f * r * (k + 0.08), hy + r * 0.5], '#f4ecd8', 1); },
+      armAng: f > 0 ? lerp(-1, 0.9, a.atk) : Math.PI - lerp(-1, 0.9, a.atk) });
+    case 'cyclops': return human(a, h, { skin: '#c9a882', cloth: '#5a4a6a', trim: '#2a1a10',
+      face: (hx, hy, r) => { const ex = hx + f * r * 0.35; c.fillStyle = '#fff'; c.beginPath(); c.ellipse(ex, hy - r * 0.05, r * 0.32, r * 0.36, 0, 0, 7); c.fill(); c.strokeStyle = OUT; c.lineWidth = 1.5; c.stroke(); c.fillStyle = '#7a3a1a'; c.beginPath(); c.arc(ex + f * r * 0.08, hy, r * 0.17, 0, 7); c.fill(); c.fillStyle = '#111'; c.beginPath(); c.arc(ex + f * r * 0.1, hy, r * 0.08, 0, 7); c.fill(); c.strokeStyle = OUT; c.lineWidth = 2; c.beginPath(); c.moveTo(ex - r * 0.4, hy - r * 0.48); c.lineTo(ex + r * 0.4, hy - r * 0.38); c.stroke(); },
+      armAng: f > 0 ? lerp(-2.2, -0.3, a.atk) : Math.PI - lerp(-2.2, -0.3, a.atk),
+      weapon: (hx, hy) => { if (a.atk < 0.6) circle(c, hx + f * h * 0.04, hy - h * 0.2, h * 0.1, '#8d8578', 2); } });
+    case 'frostgiant': return human(a, h, { skin: '#9fc8e8', cloth: '#3a5f8a', trim: '#e8f4ff', angry: true,
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#f4fbff', true); poly(c, [hx - r * 0.9, hy - r * 0.7, hx - r * 0.5, hy - r * 1.5, hx - r * 0.1, hy - r * 0.9, hx + r * 0.3, hy - r * 1.6, hx + r * 0.6, hy - r * 0.9, hx + r * 0.9, hy - r * 1.4, hx + r, hy - r * 0.6], '#d8f0ff', 1.5); },
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.8; const ex = hx + Math.cos(b2) * h * 0.5, ey = hy + Math.sin(b2) * h * 0.5; line(c, hx, hy, ex, ey, '#bfe4ff', 7); poly(c, [ex - 8, ey, ex, ey - 16, ex + 8, ey, ex, ey + 12], '#e8f8ff', 2); } });
+    case 'giantking': return human(a, h, { skin: '#c9a882', cloth: '#5a1f2a', trim: '#ffd34d', angry: true,
+      head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#8a5a2a', true); crownAt(c, hx, hy - r * 0.9, r * 0.7); },
+      weapon: (hx, hy, ang) => { const b2 = ang - f * 0.8; const ex = hx + Math.cos(b2) * h * 0.5, ey = hy + Math.sin(b2) * h * 0.5; line(c, hx, hy, ex, ey, '#6b4423', 6); c.save(); c.translate(ex, ey); c.rotate(b2); c.beginPath(); c.roundRect(-12, -16, 24, 32, 4); fillStroke(c, vgrad(c, '#8d8578', -16, 16), 2.5); c.restore(); } });
     case 'boss':
       if (bossKind === 'dunes') return scorpion(a, h / 116, false);
       if (bossKind === 'mountains') return rocks(c, x, gy, h / 84, f, a.swing, a.atk, '#8d8578', true);
@@ -629,7 +783,7 @@ function mummy(a: ArtCtx, h: number, king: boolean) {
   c.save(); c.strokeStyle = '#cbbd98'; c.lineWidth = 3; c.beginPath(); c.moveTo(a.x - a.f * 6, a.gy - h * 0.45); c.quadraticCurveTo(a.x - a.f * 20, a.gy - h * 0.35 + Math.sin(a.t * 4) * 4, a.x - a.f * 26, a.gy - h * 0.2); c.stroke(); c.restore();
 }
 
-function skeleton(a: ArtCtx, h: number) {
+function skeleton(a: ArtCtx, h: number, archer = false) {
   const { c, x, gy, f, swing } = a;
   const bone = '#ece6d6';
   const R = h * 0.19, headY = gy - h + R, hip = gy - h * 0.32;
@@ -642,11 +796,12 @@ function skeleton(a: ArtCtx, h: number) {
   for (const k of [0.1, 0.55]) { c.beginPath(); c.arc(x + f * R * k, headY - R * 0.05, R * 0.2, 0, 7); c.fill(); }
   c.fillStyle = '#ff5c3d'; for (const k of [0.1, 0.55]) { c.beginPath(); c.arc(x + f * R * k, headY - R * 0.05, R * 0.07, 0, 7); c.fill(); }
   c.fillRect(x + f * R * 0.2, headY + R * 0.5, R * 0.5 * f, 2);
-  const ang = f > 0 ? lerp(-1.25, 0.55, a.atk) : Math.PI - lerp(-1.25, 0.55, a.atk);
+  const ang = archer ? (f > 0 ? -0.15 : Math.PI + 0.15) : f > 0 ? lerp(-1.25, 0.55, a.atk) : Math.PI - lerp(-1.25, 0.55, a.atk);
   const sx = x + f * R * 0.3, sy = headY + R * 1.2;
   const hx = sx + Math.cos(ang) * h * 0.24, hy = sy + Math.sin(ang) * h * 0.24;
   line(c, sx, sy, hx, hy, bone, 2.2);
-  scimitar(c, f, h * 0.38)(hx, hy, ang);
+  if (archer) bow(c, hx, hy, h * 0.3, f, a.atk, '#5a4a3a');
+  else scimitar(c, f, h * 0.38)(hx, hy, ang);
 }
 
 function cobra(a: ArtCtx, h: number, queen: boolean) {
@@ -667,4 +822,81 @@ function cobra(a: ArtCtx, h: number, queen: boolean) {
   if (queen) crownAt(c, hx + f * 1 * s, hy - 8 * s, 6 * s);
 }
 
-export function isBossy(id: string) { return ['boss', 'scorpking', 'roc', 'worm', 'titan', 'djinn', 'warlord', 'mummyking', 'cobraqueen', 'phoenix'].includes(id); }
+// ---------------- civilization helpers ----------------
+function elfEars(c: C, hx: number, hy: number, r: number, f: number, skin: string) {
+  poly(c, [hx - f * r * 0.85, hy - r * 0.1, hx - f * r * 1.7, hy - r * 0.75, hx - f * r * 0.9, hy + r * 0.25], skin, 1.5);
+}
+function bow(c: C, hx: number, hy: number, r: number, f: number, atk: number, col: string) {
+  c.lineWidth = 3.5; c.strokeStyle = col; c.beginPath();
+  if (f > 0) c.arc(hx - r * 0.3, hy, r, -1.15, 1.15); else c.arc(hx + r * 0.3, hy, r, Math.PI - 1.15, Math.PI + 1.15);
+  c.stroke(); c.strokeStyle = '#eee'; c.lineWidth = 1.2;
+  const tipX = hx - f * r * 0.3 + f * Math.cos(1.15) * r;
+  c.beginPath(); c.moveTo(tipX, hy - Math.sin(1.15) * r); c.lineTo(hx - f * (6 + atk * 10), hy); c.lineTo(tipX, hy + Math.sin(1.15) * r); c.stroke(); c.strokeStyle = OUT;
+}
+function beard(c: C, hx: number, hy: number, r: number, f: number, col: string, long = false) {
+  c.beginPath(); c.moveTo(hx - r * 0.75, hy + r * 0.05); c.quadraticCurveTo(hx + f * r * 0.3, hy + r * (long ? 2.2 : 1.6), hx + r * 0.85, hy + r * 0.05);
+  c.quadraticCurveTo(hx + f * r * 0.3, hy + r * 0.55, hx - r * 0.75, hy + r * 0.05); c.closePath(); fillStroke(c, col, 1.5);
+}
+function axe(c: C, hx: number, hy: number, ang: number, len: number, f: number) {
+  const ex = hx + Math.cos(ang) * len, ey = hy + Math.sin(ang) * len;
+  line(c, hx, hy, ex, ey, '#7a4f28', 3);
+  c.save(); c.translate(ex, ey); c.rotate(ang); c.beginPath(); c.moveTo(-2, 0); c.quadraticCurveTo(4, -12 * f, -8, -14 * f); c.lineTo(-10, 2 * f); c.closePath(); fillStroke(c, '#c9d2dc', 1.8); c.restore();
+}
+function zombieLook(c: C, f: number, cloth: string): HumanOpts {
+  return {
+    skin: '#8fae6a', cloth, trim: '#3a2a1a', angry: true,
+    face: (hx, hy, r) => { // mismatched eyes and a slack jaw
+      c.fillStyle = '#f4f0c0'; c.beginPath(); c.arc(hx + f * r * 0.15, hy - r * 0.1, r * 0.2, 0, 7); c.fill(); c.beginPath(); c.arc(hx + f * r * 0.6, hy - r * 0.05, r * 0.13, 0, 7); c.fill();
+      c.fillStyle = '#c0392b'; c.beginPath(); c.arc(hx + f * r * 0.17, hy - r * 0.08, r * 0.07, 0, 7); c.fill();
+      c.fillStyle = '#2a1a10'; c.beginPath(); c.ellipse(hx + f * r * 0.4, hy + r * 0.5, r * 0.22, r * 0.12, 0, 0, 7); c.fill();
+      c.strokeStyle = 'rgba(60,40,20,.6)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(hx - r * 0.6, hy - r * 0.5); c.lineTo(hx - r * 0.2, hy - r * 0.2); c.stroke();
+    },
+  };
+}
+function dwarfLook(c: C, f: number, cloth: string, beardCol: string): HumanOpts {
+  void c; void f; void beardCol;
+  return { skin: '#e6b48a', cloth, trim: '#c9a24a' };
+}
+function goblinLook(c: C, f: number): HumanOpts {
+  return {
+    skin: '#7fae4a', cloth: '#6b4a2a', trim: '#3a2a1a', angry: true,
+    head: (hx, hy, r) => { for (const sd of [-1, 1]) poly(c, [hx + sd * r * 0.8, hy - r * 0.2, hx + sd * r * 1.9, hy - r * 0.6, hx + sd * r * 0.9, hy + r * 0.3], '#7fae4a', 1.5); c.fillStyle = '#5f8a3a'; c.beginPath(); c.ellipse(hx + f * r * 0.85, hy + r * 0.15, r * 0.2, r * 0.13, 0, 0, 7); c.fill(); },
+  };
+}
+
+function treant(a: ArtCtx, h: number) {
+  const { c, x, gy, f, swing, atk, t } = a;
+  const bark = '#6b4a2a';
+  for (const sw of [swing, -swing]) line(c, x, gy - h * 0.3, x + Math.sin(sw) * h * 0.18, gy - 2, shade(bark, -0.1), 10);
+  c.beginPath(); c.moveTo(x - h * 0.18, gy - h * 0.28); c.quadraticCurveTo(x - h * 0.22, gy - h * 0.7, x - h * 0.1, gy - h * 0.85); c.lineTo(x + h * 0.12, gy - h * 0.85); c.quadraticCurveTo(x + h * 0.24, gy - h * 0.6, x + h * 0.18, gy - h * 0.28); c.closePath();
+  fillStroke(c, vgrad(c, bark, gy - h * 0.85, gy - h * 0.28), 2.5);
+  c.strokeStyle = 'rgba(40,25,10,.5)'; c.lineWidth = 1.5; for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(x + k * h * 0.07, gy - h * 0.8); c.quadraticCurveTo(x + k * h * 0.1, gy - h * 0.55, x + k * h * 0.06, gy - h * 0.32); c.stroke(); } c.strokeStyle = OUT;
+  // branch arms
+  line(c, x - f * h * 0.1, gy - h * 0.7, x - f * h * 0.35, gy - h * 0.45, bark, 6);
+  const ax = x + f * (h * 0.35 + atk * 10), ay = gy - h * (0.6 - atk * 0.2);
+  line(c, x + f * h * 0.1, gy - h * 0.72, ax, ay, bark, 7);
+  line(c, ax, ay, ax + f * 10, ay - 8, bark, 3); line(c, ax, ay, ax + f * 12, ay + 4, bark, 3);
+  // leafy crown
+  for (const [dx, dy, r] of [[0, -0.95, 0.22], [-0.17, -0.88, 0.16], [0.18, -0.9, 0.17], [0, -1.08, 0.15]] as [number, number, number][]) circle(c, x + dx * h, gy + dy * h + Math.sin(t * 1.5 + dx * 10) * 1.5, r * h, '#3f8f3a', 2);
+  eyes(c, x + f * h * 0.02, gy - h * 0.66, h * 0.12, f, true, '#d8ff7a');
+}
+
+function elkRider(a: ArtCtx) {
+  const { c, x, gy, f, swing } = a;
+  const col = '#9a6a3a';
+  const by = gy - 34 - Math.abs(Math.sin(a.u.anim)) * 3;
+  for (const [dx, k] of [[-16, 1], [-9, -1], [12, -1], [19, 1]] as [number, number][]) line(c, x + f * dx, by + 8, x + f * dx + Math.sin(swing * k * 1.3) * 11, gy - 2, col, 4.5);
+  ellipse(c, x, by, 25, 12, col);
+  poly(c, [x + f * 18, by - 4, x + f * 28, by - 24, x + f * 36, by - 22, x + f * 28, by + 2], col);
+  ellipse(c, x + f * 38, by - 22, 9, 6, col, f * 0.3);
+  eyes(c, x + f * 36, by - 25, 5, f, false);
+  c.save(); c.strokeStyle = '#e8dcc0'; c.lineWidth = 2.5; c.lineCap = 'round';
+  for (const off of [-3, 4]) { const bx = x + f * (34 + off), byy = by - 28; c.beginPath(); c.moveTo(bx, byy); c.lineTo(bx - f * 6, byy - 16); c.moveTo(bx - f * 3, byy - 8); c.lineTo(bx - f * 12, byy - 10); c.moveTo(bx - f * 5, byy - 13); c.lineTo(bx + f * 2, byy - 22); c.stroke(); }
+  c.restore();
+  const rider: ArtCtx = { ...a, gy: by - 4, swing: 0 };
+  human(rider, 42, { skin: '#f2d2b0', cloth: '#2f8f4e', trim: '#d9c36a', noLegs: true, head: (hx, hy, r) => elfEars(c, hx, hy, r, f, '#f2d2b0'),
+    armAng: f > 0 ? 0.25 - a.atk * 0.25 : Math.PI - 0.25 + a.atk * 0.25,
+    weapon: (hx, hy) => { const push = a.atk * 10 * f; line(c, hx - f * 14 + push, hy, hx + f * 40 + push, hy - 4, '#d9c36a', 2.5); poly(c, [hx + f * 40 + push, hy - 8, hx + f * 52 + push, hy - 5, hx + f * 40 + push, hy - 1], '#dfe6ec', 1.5); } });
+}
+
+export function isBossy(id: string) { return ['boss', 'scorpking', 'roc', 'worm', 'titan', 'djinn', 'warlord', 'mummyking', 'cobraqueen', 'phoenix', 'elfqueen', 'ghostking', 'plaguelord', 'dwarfking', 'giantking'].includes(id); }

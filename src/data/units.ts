@@ -8,7 +8,13 @@ export type UnitId =
 export type EnemyId = UnitId
   | 'bandit' | 'sandmage' | 'golem' | 'ghost' | 'boss'
   | 'hyena' | 'vulture' | 'scorpking' | 'roc' | 'worm' | 'titan' | 'djinn' | 'warlord'
-  | 'mummy' | 'skeleton' | 'cobra' | 'mummyking' | 'cobraqueen' | 'phoenix';
+  | 'mummy' | 'skeleton' | 'cobra' | 'mummyking' | 'cobraqueen' | 'phoenix'
+  // civilizations
+  | 'elfworker' | 'elfarcher' | 'bladedancer' | 'druid' | 'treant' | 'elkrider' | 'elfqueen'
+  | 'wisp' | 'wraith' | 'banshee' | 'specter' | 'phantom' | 'ghostking'
+  | 'gravedigger' | 'zombie' | 'runner' | 'bloater' | 'skelarcher' | 'abomination' | 'necromancer' | 'plaguelord'
+  | 'dwarfminer' | 'axethrower' | 'shieldwall' | 'berserker' | 'cannon' | 'gyrocopter' | 'dwarfking'
+  | 'goblin' | 'goblinspear' | 'ogre' | 'troll' | 'cyclops' | 'frostgiant' | 'giantking';
 
 export interface UnitDef {
   id: EnemyId;
@@ -30,6 +36,11 @@ export interface UnitDef {
   dodge?: number; // chance to ignore a single-target hit
   aura?: number; // +x damage to allies within 140px
   support?: boolean; // stays behind the line and doesn't attack (drummer)
+  miner?: boolean; // digs gold at its side's mine
+  mineMult?: number; // mining speed (dwarves dig faster)
+  regen?: number; // hp per second
+  explode?: { dmg: number; radius: number }; // bursts on death
+  summon?: { unit: EnemyId; every: number }; // raises allies over time
   maxCount?: number; // max alive at once
   boss?: boolean;
   height: number;
@@ -37,7 +48,7 @@ export interface UnitDef {
 
 export const UNITS: Record<EnemyId, UnitDef> = {
   // --- PRD roster ---
-  miner:    { id: 'miner',    cost: 50,  train: 3,  hp: 60,  dmg: 2,  range: 22,  speed: 55, cooldown: 1.0, unlock: 1,  height: 49 },
+  miner:    { id: 'miner',    cost: 50,  train: 3,  hp: 60,  dmg: 2,  range: 22,  speed: 55, cooldown: 1.0, unlock: 1,  height: 49, miner: true },
   sword:    { id: 'sword',    cost: 75,  train: 2,  hp: 120, dmg: 12, range: 26,  speed: 60, cooldown: 0.9, unlock: 1,  height: 55 },
   archer:   { id: 'archer',   cost: 150, train: 4,  hp: 80,  dmg: 15, range: 230, speed: 52, cooldown: 1.4, unlock: 3,  height: 55, ranged: true, bonusVs: ['spear', 'golem', 'vulture'] },
   spear:    { id: 'spear',    cost: 250, train: 6,  hp: 400, dmg: 10, range: 40,  speed: 40, cooldown: 1.0, unlock: 7,  height: 61, bonusVs: ['camel', 'lion', 'hyena'] },
@@ -78,6 +89,46 @@ export const UNITS: Record<EnemyId, UnitDef> = {
   mummyking:{ id: 'mummyking',cost: 0, train: 0, hp: 3600, dmg: 38, range: 55, speed: 30, cooldown: 1.5, unlock: 99, height: 118, splash: 48, aura: 0.2, boss: true },
   cobraqueen:{ id: 'cobraqueen', cost: 0, train: 0, hp: 3200, dmg: 40, range: 60, speed: 58, cooldown: 1.0, unlock: 99, height: 90, splash: 40, crit: 0.25, boss: true },
   phoenix:  { id: 'phoenix',  cost: 0, train: 0, hp: 3400, dmg: 38, range: 200, speed: 70, cooldown: 1.7, unlock: 99, height: 90, flying: true, ranged: true, splash: 58, boss: true },
+  // --- Elves: fast, long-ranged, nature magic ---
+  elfworker:  { id: 'elfworker',  cost: 0, train: 0, hp: 60,  dmg: 2,  range: 22, speed: 62, cooldown: 1, unlock: 99, height: 50, miner: true },
+  elfarcher:  { id: 'elfarcher',  cost: 0, train: 0, hp: 75,  dmg: 14, range: 280, speed: 60, cooldown: 1.15, unlock: 99, height: 56, ranged: true, bonusVs: ['spear', 'shieldwall'] },
+  bladedancer:{ id: 'bladedancer',cost: 0, train: 0, hp: 130, dmg: 15, range: 26, speed: 98, cooldown: 0.55, unlock: 99, height: 56, dodge: 0.3 },
+  druid:      { id: 'druid',      cost: 0, train: 0, hp: 100, dmg: 0,  range: 150, speed: 50, cooldown: 1.3, unlock: 99, height: 56, heal: 16 },
+  treant:     { id: 'treant',     cost: 0, train: 0, hp: 900, dmg: 26, range: 42, speed: 26, cooldown: 1.8, unlock: 99, height: 105, splash: 32, regen: 6 },
+  elkrider:   { id: 'elkrider',   cost: 0, train: 0, hp: 320, dmg: 26, range: 34, speed: 115, cooldown: 1.0, unlock: 99, height: 82, charge: true, bonusVs: ['archer', 'crossbow'] },
+  elfqueen:   { id: 'elfqueen',   cost: 0, train: 0, hp: 3000, dmg: 36, range: 230, speed: 40, cooldown: 1.6, unlock: 99, height: 96, ranged: true, splash: 55, regen: 12, boss: true },
+  // --- Ghosts: flying, dodging, wailing ---
+  wisp:       { id: 'wisp',       cost: 0, train: 0, hp: 55,  dmg: 2,  range: 22, speed: 60, cooldown: 1, unlock: 99, height: 40, miner: true },
+  wraith:     { id: 'wraith',     cost: 0, train: 0, hp: 110, dmg: 14, range: 30, speed: 95, cooldown: 0.8, unlock: 99, height: 52, flying: true },
+  banshee:    { id: 'banshee',    cost: 0, train: 0, hp: 90,  dmg: 15, range: 190, speed: 48, cooldown: 2.0, unlock: 99, height: 58, ranged: true, splash: 40 },
+  specter:    { id: 'specter',    cost: 0, train: 0, hp: 380, dmg: 20, range: 32, speed: 46, cooldown: 1.1, unlock: 99, height: 66, dodge: 0.2 },
+  phantom:    { id: 'phantom',    cost: 0, train: 0, hp: 150, dmg: 22, range: 28, speed: 105, cooldown: 0.8, unlock: 99, height: 56, crit: 0.3, dodge: 0.15 },
+  ghostking:  { id: 'ghostking',  cost: 0, train: 0, hp: 3200, dmg: 40, range: 60, speed: 44, cooldown: 1.4, unlock: 99, height: 110, flying: true, splash: 50, dodge: 0.1, boss: true },
+  // --- Zombies: cheap hordes, explosions, necromancy ---
+  gravedigger:{ id: 'gravedigger',cost: 0, train: 0, hp: 70,  dmg: 3,  range: 22, speed: 45, cooldown: 1, unlock: 99, height: 50, miner: true },
+  zombie:     { id: 'zombie',     cost: 0, train: 0, hp: 140, dmg: 10, range: 26, speed: 30, cooldown: 1.1, unlock: 99, height: 56 },
+  runner:     { id: 'runner',     cost: 0, train: 0, hp: 80,  dmg: 11, range: 26, speed: 110, cooldown: 0.7, unlock: 99, height: 54 },
+  bloater:    { id: 'bloater',    cost: 0, train: 0, hp: 230, dmg: 8,  range: 26, speed: 28, cooldown: 1.2, unlock: 99, height: 64, explode: { dmg: 70, radius: 75 } },
+  skelarcher: { id: 'skelarcher', cost: 0, train: 0, hp: 70,  dmg: 12, range: 220, speed: 55, cooldown: 1.4, unlock: 99, height: 55, ranged: true },
+  abomination:{ id: 'abomination',cost: 0, train: 0, hp: 1100, dmg: 30, range: 40, speed: 24, cooldown: 1.6, unlock: 99, height: 100, splash: 36 },
+  necromancer:{ id: 'necromancer',cost: 0, train: 0, hp: 110, dmg: 14, range: 190, speed: 44, cooldown: 1.8, unlock: 99, height: 58, ranged: true, summon: { unit: 'zombie', every: 9 } },
+  plaguelord: { id: 'plaguelord', cost: 0, train: 0, hp: 3500, dmg: 42, range: 60, speed: 28, cooldown: 1.5, unlock: 99, height: 120, splash: 55, summon: { unit: 'runner', every: 6 }, boss: true },
+  // --- Dwarves: sturdy, siege engines, rich mines ---
+  dwarfminer: { id: 'dwarfminer', cost: 0, train: 0, hp: 90,  dmg: 4,  range: 22, speed: 45, cooldown: 1, unlock: 99, height: 42, miner: true, mineMult: 1.4 },
+  axethrower: { id: 'axethrower', cost: 0, train: 0, hp: 130, dmg: 18, range: 180, speed: 44, cooldown: 1.4, unlock: 99, height: 46, ranged: true },
+  shieldwall: { id: 'shieldwall', cost: 0, train: 0, hp: 620, dmg: 10, range: 30, speed: 32, cooldown: 1.0, unlock: 99, height: 48, bonusVs: ['cavalry', 'camel', 'lion'] },
+  berserker:  { id: 'berserker',  cost: 0, train: 0, hp: 230, dmg: 24, range: 28, speed: 70, cooldown: 0.8, unlock: 99, height: 47, crit: 0.2 },
+  cannon:     { id: 'cannon',     cost: 0, train: 0, hp: 260, dmg: 70, range: 330, speed: 26, cooldown: 3.4, unlock: 99, height: 46, ranged: true, splash: 60 },
+  gyrocopter: { id: 'gyrocopter', cost: 0, train: 0, hp: 170, dmg: 14, range: 160, speed: 80, cooldown: 1.2, unlock: 99, height: 46, flying: true, ranged: true },
+  dwarfking:  { id: 'dwarfking',  cost: 0, train: 0, hp: 3600, dmg: 44, range: 50, speed: 30, cooldown: 1.3, unlock: 99, height: 82, splash: 48, aura: 0.2, boss: true },
+  // --- Giants: few, huge, devastating ---
+  goblin:     { id: 'goblin',     cost: 0, train: 0, hp: 55,  dmg: 2,  range: 22, speed: 65, cooldown: 1, unlock: 99, height: 40, miner: true },
+  goblinspear:{ id: 'goblinspear',cost: 0, train: 0, hp: 90,  dmg: 10, range: 34, speed: 72, cooldown: 0.8, unlock: 99, height: 42 },
+  ogre:       { id: 'ogre',       cost: 0, train: 0, hp: 720, dmg: 30, range: 40, speed: 34, cooldown: 1.4, unlock: 99, height: 96, splash: 32 },
+  troll:      { id: 'troll',      cost: 0, train: 0, hp: 520, dmg: 22, range: 36, speed: 42, cooldown: 1.0, unlock: 99, height: 90, regen: 10 },
+  cyclops:    { id: 'cyclops',    cost: 0, train: 0, hp: 820, dmg: 45, range: 260, speed: 30, cooldown: 3.0, unlock: 99, height: 108, ranged: true, splash: 45 },
+  frostgiant: { id: 'frostgiant', cost: 0, train: 0, hp: 1650, dmg: 50, range: 50, speed: 24, cooldown: 1.8, unlock: 99, height: 130, splash: 50 },
+  giantking:  { id: 'giantking',  cost: 0, train: 0, hp: 5200, dmg: 60, range: 60, speed: 24, cooldown: 1.8, unlock: 99, height: 150, splash: 60, regen: 8, boss: true },
   warlord:  { id: 'warlord',  cost: 0, train: 0, hp: 6500, dmg: 60, range: 55, speed: 34, cooldown: 1.3, unlock: 99, height: 120, splash: 45, aura: 0.2, boss: true },
 };
 
@@ -92,7 +143,9 @@ export const MAX_ARMY = 40;
 export const CONTROL_BONUS = 1.3;
 export const COUNTER_BONUS = 1.75;
 export const FLY_HEIGHT = 95;
-export const MAX_RANK = 2; // veteran ranks earned from kills
+export const MAX_RANK = 3; // veteran ranks earned from kills
+export const RANK_KILLS = [3, 7, 12]; // kills needed for ★, ★★, ★★★
+export const RANK_HEAL = [0.3, 0.5, 1]; // share of max HP restored on each promotion
 
 /** +8% hp/dmg per upgrade level (PRD 6). */
 export const upgradeMult = (lvl: number) => 1 + 0.08 * (lvl - 1);
