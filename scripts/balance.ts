@@ -19,7 +19,7 @@ export function play(levelIdx: number, upg: number, skill: number, level?: Level
     think = 0.5 / skill;
     const army = b.playerArmy.filter((u) => u.def.id !== 'miner');
     const miners = b.minerCount();
-    if (miners < (levelIdx < 5 ? 4 : 6) && b.canTrain('miner') && (army.length >= 2 || miners < 3)) { b.train('miner'); continue; }
+    if (miners < (levelIdx < 5 ? 4 : 8) && b.canTrain('miner') && (army.length >= 2 || miners < 3)) { b.train('miner'); continue; }
     const enemies = b.units.filter((u) => u.side === 1 && !u.dead);
     const comp: UnitId[] = ['sword'];
     if (avail('archer')) comp.push('archer', 'sword');
@@ -34,6 +34,7 @@ export function play(levelIdx: number, upg: number, skill: number, level?: Level
     if (army.length >= threshold && b.mode !== 'attack') b.setMode('attack');
     else if (army.length < threshold * 0.4 && b.mode === 'attack') b.setMode('defend');
     if (b.ability >= 1 && enemies.length >= 3) b.useAbility();
+    if (b.gold > b.mineCost() + 250) b.upgradeMine();
   }
   if (process.env.DBG && result !== true) console.log(levelIdx, result === null ? "TIMEOUT" : "LOSS", Math.round(b.time), "castle", b.castleHp.map(Math.round), "enemies", b.units.filter((u) => u.side === 1 && !u.dead).length, "army", b.playerArmy.length, "loops", b.loopCount);
   return { win: result === true, time: b.time, stars: b.stars(result === true) };

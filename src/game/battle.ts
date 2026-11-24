@@ -1,4 +1,4 @@
-import { UNITS, MINER_GOLD, MINER_INTERVAL, MAX_MINERS, MAX_ARMY, CONTROL_BONUS, COUNTER_BONUS, FLY_HEIGHT, MAX_RANK, RANK_KILLS, RANK_HEAL, upgradeMult, type EnemyId, type UnitId, type UnitDef } from '../data/units';
+import { UNITS, MINER_GOLD, MINER_INTERVAL, MAX_MINERS, MAX_ARMY, CONTROL_BONUS, COUNTER_BONUS, FLY_HEIGHT, MAX_RANK, RANK_KILLS, RANK_HEAL, MINE_UPGRADE, MINE_YIELD, upgradeMult, type EnemyId, type UnitId, type UnitDef } from '../data/units';
 import { costOf, type LevelDef } from '../data/levels';
 import { ABILITIES, passiveFx, type Perks } from '../data/skills';
 import { survivalWave } from '../data/challenges';
@@ -54,6 +54,9 @@ export interface Unit {
   tier: number; // visual tier 0..4
   summonCd: number;
   stun: number; // seconds stunned
+  carry: number; // gold in the sack (miners)
+  tripT: number; // time spent on the current mining trip
+  hidden: boolean; // miner sheltering inside the fort
   stompCd: number;
   dmgText?: FloatText; // merges rapid hits into one rising number
 }
@@ -81,6 +84,7 @@ export interface BattleEvents {
   onUnitTrained(id: UnitId): void;
   onWave?(n: number): void;
   onRank?(u: Unit): void;
+  onRush?(): void;
 }
 
 export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId };
@@ -134,6 +138,12 @@ export class Battle {
   towerArchers: [number, number] = [1, 0];
   /** survival skill cards: stacking bonuses picked between waves */
   cards = { dmg: 1, speed: 1, gold: 1, horde: 0 };
+  mineLevel: [number, number] = [1, 1];
+  hideMiners: [boolean, boolean] = [false, false];
+  rush = 0; // gold rush timer (both mines yield double)
+  private rushNext = 70 + Math.random() * 40;
+  holdX = W / 2 - 80; // rally flag for "hold"
+  fx: { kind: 'slash' | 'spark'; x: number; y: number; f: number; life: number; max: number }[] = [];
   stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0, bossKills: 0 };
   private survivalNext = 8;
   private passiveIncome = 0;
@@ -179,7 +189,7 @@ export class Battle {
   get playerArmy() { return this.units.filter((u) => u.side === 0 && !u.dead); }
   get enemyStat() { return this.level.enemyMult * this.diff.stat; }
   goldMult(side: Side) {
-    return side === 0 ? (this.level.mods?.goldMult ?? 1) * passiveFx.mining(this.perks.passives.mining) * this.cards.gold : (this.level.ai?.income ?? 1) * this.diff.income;
+    return MINE_YIELD[this.mineLevel[side] - 1] * (this.rush > 0 ? 2 : 1) * (side === 0 ? (this.level.mods?.goldMult ?? 1) * passiveFx.mining(this.perks.passives.mining) * this.cards.gold : (this.level.ai?.income ?? 1) * this.diff.income);
   }
   minerCount(side: Side = 0) {
     const q = side === 0 ? this.queue : this.equeue;
@@ -227,7 +237,7 @@ export class Battle {
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
       chargeReady: !!def.charge, calm: 0, mineTimer: Math.random() * 2, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0,
-      summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0,
+      summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0, carry: 0, tripT: 0, hidden: false,
       tier: side === 0 ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
@@ -235,6 +245,18 @@ export class Battle {
   }
 
   setMode(m: Mode) { this.mode = m; sfx('click'); }
+
+  mineCost() { return this.mineLevel[0] < MINE_YIELD.length ? MINE_UPGRADE[this.mineLevel[0]] : Infinity; }
+  upgradeMine() {
+    const c = this.mineCost();
+    if (this.gold < c) return false;
+    this.gold -= c; this.mineLevel[0]++;
+    sfx('coin');
+    this.texts.push({ x: MINE_X[0], y: GROUND - 80, text: '⛏️ +' + Math.round((MINE_YIELD[this.mineLevel[0] - 1] - 1) * 100) + '%', life: 1.4, color: '#ffe066', size: 20 });
+    return true;
+  }
+  toggleHide() { this.hideMiners[0] = !this.hideMiners[0]; sfx('click'); }
+  setRally(x: number) { this.holdX = Math.max(CASTLE_X[0] + 120, Math.min(CASTLE_X[1] - 160, x)); this.mode = 'hold'; sfx('click'); }
 
   towerCost() { return this.towerArchers[0] < MAX_TOWER_ARCHERS ? TOWER_COST[this.towerArchers[0]] : Infinity; }
   buyTowerArcher() {
@@ -321,6 +343,11 @@ export class Battle {
     this.buff = Math.max(0, this.buff - dt);
     this.debuff = Math.max(0, this.debuff - dt);
     this.shake = Math.max(0, this.shake - dt * 2);
+    this.rush = Math.max(0, this.rush - dt);
+    this.rushNext -= dt;
+    if (this.rushNext <= 0) { this.rush = 12; this.rushNext = 80 + Math.random() * 50; this.ev.onRush?.(); }
+    for (const e of this.fx) e.life -= dt;
+    if (this.fx.length) this.fx = this.fx.filter((e) => e.life > 0);
     this.storm = this.level.region === 'dunes' ? 0.5 + 0.5 * Math.sin(this.time * 0.25) : 0;
     if (this.debuff > 0) this.storm = 1;
 
@@ -561,6 +588,13 @@ export class Battle {
       const fast = army.filter((u) => u.def.speed >= 90 && !u.def.flying).slice(0, 2);
       if (this.units.some((u) => u.side === 0 && u.def.miner && !u.dead)) for (const u of fast) u.raid = true;
     }
+    // Smart commanders pull miners into the fort when raiders reach the mine.
+    if (ai >= 2) {
+      const threat = this.playerArmy.some((u) => !u.def.miner && Math.abs(u.x - MINE_X[1]) < 230);
+      this.hideMiners[1] = threat;
+    }
+    // Rich commanders upgrade their mine.
+    if (ai >= 2 && this.mineLevel[1] < 3 && this.egold > (ai === 3 ? 450 : 700) && this.time > 50) { this.egold -= MINE_UPGRADE[this.mineLevel[1]]; this.mineLevel[1]++; }
     // Hard AI reinforces its fort with a second archer once it is rich.
     if (ai === 3 && this.towerArchers[1] === 1 && this.egold > 520 && this.time > 70) { this.egold -= 300; this.towerArchers[1] = 2; }
     // Hard AI uses an arrow volley on your densest group.
@@ -580,6 +614,7 @@ export class Battle {
 
   /** Melee ground units can't reach flying units. */
   canHit(a: Unit, b: Unit) {
+    if (b.hidden) return false;
     return !b.def.flying || !!a.def.ranged || !!a.def.flying;
   }
 
@@ -595,24 +630,35 @@ export class Battle {
     return best;
   }
 
+  /** Miners dig at the mine, then haul the sack back to the fort (exposed on the way). */
   private updateMiner(u: Unit, dt: number) {
-    const mx = MINE_X[u.side] + ((u.uid * 37) % 60) - 30;
-    // Flee to the fort when enemies are right on top of the mine.
-    const danger = this.nearestFoe(u, 60);
-    if (danger && u.side === 0 && this.mode === 'defend') { /* stay brave in defend mode */ }
-    if (Math.abs(u.x - mx) > 4) {
-      u.x += Math.sign(mx - u.x) * u.def.speed * dt;
-      u.moving = true;
-    } else {
-      u.mineTimer += dt * this.goldMult(u.side) * (u.def.mineMult ?? 1);
-      if (u.mineTimer >= MINER_INTERVAL) {
-        u.mineTimer -= MINER_INTERVAL;
-        if (u.side === 0) {
-          this.gold += MINER_GOLD; this.stats.mined += MINER_GOLD;
-          this.texts.push({ x: u.x, y: GROUND - 60 + u.lane, text: `+${MINER_GOLD}`, life: 0.9, color: '#ffd34d' });
-        } else this.egold += MINER_GOLD;
+    const side = u.side;
+    const door = CASTLE_X[side] + (side === 0 ? 30 : -30);
+    const walk = (to: number) => { if (Math.abs(u.x - to) > 4) { u.x += Math.sign(to - u.x) * u.def.speed * dt; u.moving = true; return false; } return true; };
+    if (this.hideMiners[side]) { // shelter inside the fort until the coast is clear
+      if (walk(door)) u.hidden = true;
+      return;
+    }
+    u.hidden = false;
+    u.tripT += dt;
+    const rate = (MINER_GOLD / MINER_INTERVAL) * this.goldMult(side) * (u.def.mineMult ?? 1);
+    if (u.carry > 0) { // hauling the sack home
+      if (walk(door)) {
+        const g = Math.round(u.carry);
+        if (side === 0) { this.gold += g; this.stats.mined += g; this.texts.push({ x: u.x, y: GROUND - 60 + u.lane, text: `+${g}`, life: 0.9, color: '#ffd34d' }); }
+        else this.egold += g;
+        u.carry = 0; u.tripT = 0;
       }
-      if (u.mineTimer % 1 < dt) u.attacking = 0.35;
+      return;
+    }
+    const mx = MINE_X[side] + ((u.uid * 37) % 60) - 30;
+    if (!walk(mx)) return;
+    u.mineTimer += dt;
+    if (u.mineTimer % 0.9 < dt) u.attacking = 0.35; // pickaxe swing
+    if (u.mineTimer >= 2.6) { // sack full: worth the whole trip's time at the mining rate
+      u.mineTimer = 0;
+      const tripTime = Math.max(u.tripT, 2.6) + Math.abs(mx - door) / u.def.speed;
+      u.carry = rate * tripTime;
     }
   }
 
@@ -656,7 +702,7 @@ export class Battle {
     }
     switch (this.mode) {
       case 'defend': return CASTLE_X[0] + 220 - (back ? 70 : 0) - idx * 8;
-      case 'hold': return W / 2 - 80 - (back ? 90 : 0) - idx * 10;
+      case 'hold': return this.holdX - (back ? 90 : 0) - idx * 10;
       case 'attack': return W;
     }
   }
@@ -790,7 +836,7 @@ export class Battle {
       if (this.towerCd[side] > 0) continue;
       const fx = CASTLE_X[side] + (side === 0 ? -60 : 60);
       const range = TOWER_RANGE[side];
-      const foes = this.units.filter((o) => o.side !== side && !o.dead && Math.abs(o.x - fx) < range).sort((a, z) => Math.abs(a.x - fx) - Math.abs(z.x - fx));
+      const foes = this.units.filter((o) => o.side !== side && !o.dead && !o.hidden && Math.abs(o.x - fx) < range).sort((a, z) => Math.abs(a.x - fx) - Math.abs(z.x - fx));
       if (!foes.length) { this.towerCd[side] = 0.25; continue; }
       this.towerCd[side] = side === 0 ? 1.0 : 1.4;
       this.towerShot[side] = 0.3;
@@ -826,7 +872,11 @@ export class Battle {
     // A little knockback sells the impact.
     if (!foe.def.boss && foe.def.hp < 700) foe.x += (u.side === 0 ? 1 : -1) * (u.def.hp > 1000 ? 10 : 3);
     sfx('hit');
-    this.dust(foe.x, this.unitY(foe) - foe.def.height * 0.6, '#f3e3b8', 4);
+    const fy = this.unitY(foe) - foe.def.height * 0.6;
+    if (this.fx.length < 60) {
+      this.fx.push({ kind: 'slash', x: (u.x + foe.x) / 2, y: fy, f: u.side === 0 ? 1 : -1, life: 0.18, max: 0.18 });
+      this.fx.push({ kind: 'spark', x: foe.x, y: fy, f: u.side === 0 ? 1 : -1, life: 0.22, max: 0.22 });
+    }
   }
 
   unitY(u: Unit) {

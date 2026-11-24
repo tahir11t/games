@@ -90,13 +90,13 @@ export class Renderer {
     }
     if (b.level.region === 'tombs') this.tombProps();
 
-    this.drawMine(MINE_X[0]);
-    this.drawMine(MINE_X[1]);
+    this.drawMine(MINE_X[0], b.mineLevel[0], b.rush, time);
+    this.drawMine(MINE_X[1], b.mineLevel[1], b.rush, time);
     this.drawCastle(0, b.castleHp[0] / b.castleMax[0], b.level.region, false, b, time);
     this.drawCastle(1, isFinite(b.castleHp[1]) ? b.castleHp[1] / b.castleMax[1] : 1, b.level.region, !isFinite(b.castleHp[1]), b, time);
 
     // formation marker (a small banner on the ground)
-    const markX = b.mode === 'defend' ? CASTLE_X[0] + 220 : b.mode === 'hold' ? W / 2 - 80 : -1;
+    const markX = b.mode === 'defend' ? CASTLE_X[0] + 220 : b.mode === 'hold' ? b.holdX : -1;
     if (markX > 0) {
       c.strokeStyle = 'rgba(60,40,20,.7)'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(markX, GROUND + 14); c.lineTo(markX, GROUND - 46); c.stroke();
       c.fillStyle = 'rgba(224,168,46,.85)'; c.beginPath(); c.moveTo(markX, GROUND - 46); c.lineTo(markX + 22 + Math.sin(time * 4) * 3, GROUND - 40); c.lineTo(markX, GROUND - 32); c.closePath(); c.fill();
@@ -104,10 +104,27 @@ export class Renderer {
 
     this.lastControlled = b.controlled;
     const sorted = [...b.units].sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || a.lane - z.lane);
-    for (const u of sorted) this.drawUnit(u, b);
+    for (const u of sorted) if (!u.hidden) this.drawUnit(u, b);
+    // melee slash arcs and hit sparks
+    for (const e of b.fx) {
+      const k = e.life / e.max;
+      if (e.kind === 'slash') {
+        c.strokeStyle = `rgba(255,255,255,${0.85 * k})`; c.lineWidth = 3 + 3 * k; c.lineCap = 'round';
+        c.beginPath(); c.arc(e.x, e.y, 16, e.f > 0 ? -1.3 : Math.PI - 0.6, e.f > 0 ? 0.6 : Math.PI + 1.3); c.stroke();
+      } else {
+        c.strokeStyle = `rgba(255,230,140,${k})`; c.lineWidth = 2;
+        const r1 = 4 + (1 - k) * 10, r2 = r1 + 6 * k;
+        for (let i = 0; i < 6; i++) { const a = i * 1.047 + e.x; c.beginPath(); c.moveTo(e.x + Math.cos(a) * r1, e.y + Math.sin(a) * r1); c.lineTo(e.x + Math.cos(a) * r2, e.y + Math.sin(a) * r2); c.stroke(); }
+      }
+    }
 
     for (const p of b.projectiles) {
       if (p.t < 0) continue;
+      if ((p.kind === 'arrow' || p.kind === 'bolt' || p.kind === 'magic') && (p.vx || p.vy)) { // motion trail
+        const sp = Math.hypot(p.vx, p.vy) || 1;
+        c.strokeStyle = p.kind === 'magic' ? 'rgba(200,150,255,.35)' : 'rgba(255,255,255,.35)'; c.lineWidth = p.kind === 'magic' ? 4 : 2;
+        c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - (p.vx / sp) * 26, p.y - (p.vy / sp) * 26); c.stroke();
+      }
       c.save(); c.translate(p.x, p.y); c.rotate(Math.atan2(p.vy, p.vx));
       if (p.kind === 'arrow' || p.kind === 'bolt') {
         const L = p.kind === 'bolt' ? 14 : 18;
@@ -375,8 +392,14 @@ export class Renderer {
     }
   }
 
-  private drawMine(x: number) {
+  private drawMine(x: number, level = 1, rush = 0, time = 0) {
     const c = this.ctx;
+    if (rush > 0) { // gold rush: the vein glows
+      const pulse = 0.5 + Math.sin(time * 8) * 0.2;
+      const g = c.createRadialGradient(x, GROUND - 30, 5, x, GROUND - 30, 110);
+      g.addColorStop(0, `rgba(255,220,90,${0.55 * pulse})`); g.addColorStop(1, 'rgba(255,200,60,0)');
+      c.fillStyle = g; c.fillRect(x - 110, GROUND - 140, 220, 150);
+    }
     const g = c.createLinearGradient(0, GROUND - 60, 0, GROUND);
     g.addColorStop(0, '#a48a68'); g.addColorStop(1, '#6e5a42');
     c.fillStyle = g; c.strokeStyle = INK; c.lineWidth = 2.5;
@@ -390,6 +413,10 @@ export class Renderer {
       const s = 4 + Math.sin(t + i * 1.7) * 1.5;
       c.fillStyle = '#ffd34d'; c.beginPath(); c.moveTo(x + dx, GROUND + dy - s); c.lineTo(x + dx + s, GROUND + dy); c.lineTo(x + dx, GROUND + dy + s); c.lineTo(x + dx - s, GROUND + dy); c.fill();
     }
+    // mine upgrades: support beams and a lantern, plus a level plaque
+    if (level >= 2) { c.strokeStyle = '#7a4f28'; c.lineWidth = 4; c.beginPath(); c.moveTo(x - 44, GROUND); c.lineTo(x - 30, GROUND - 40); c.moveTo(x + 46, GROUND); c.lineTo(x + 30, GROUND - 34); c.stroke(); }
+    if (level >= 3) { c.fillStyle = '#ffcf6a'; c.beginPath(); c.arc(x - 2, GROUND - 44, 4.5, 0, 7); c.fill(); c.strokeStyle = '#3a2a1a'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x - 2, GROUND - 58); c.lineTo(x - 2, GROUND - 49); c.stroke(); }
+    if (level >= 2) { c.fillStyle = '#5a3a1e'; c.fillRect(x - 54, GROUND - 26, 22, 14); c.fillStyle = '#ffd34d'; c.font = '900 10px system-ui'; c.textAlign = 'center'; c.fillText('★'.repeat(level - 1), x - 43, GROUND - 16); }
     // mine cart
     c.fillStyle = '#6b4423'; c.fillRect(x + 22, GROUND - 14, 20, 10); c.strokeStyle = INK; c.lineWidth = 1.5; c.strokeRect(x + 22, GROUND - 14, 20, 10);
     c.fillStyle = '#ffd34d'; c.beginPath(); c.arc(x + 32, GROUND - 14, 6, Math.PI, 0); c.fill();
@@ -520,7 +547,7 @@ export class Renderer {
       for (let k = 0; k < b.towerArchers[side]; k++) {
         const [ax, ay] = posts[k];
         const towerDef = UNITS[({ elves: 'elfarcher', ghosts: 'banshee', zombies: 'skelarcher', dwarves: 'axethrower' } as Record<string, EnemyId>)[style] ?? 'archer'];
-        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
+        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
         c.save(); c.translate(ax, ay); c.scale(0.8, 0.8); c.translate(-ax, -ay - 4);
         drawArt({ c, u: a, x: ax, gy: ay, f, t: time + k, swing: 0, atk, side, region, flash: false, tier: a.tier });
         c.restore();
@@ -579,8 +606,17 @@ export class Renderer {
     const atk = u.attacking > 0 ? Math.sin((1 - u.attacking / 0.3) * Math.PI) : 0;
     // a new tier (every 5 upgrade levels) also makes the unit a little bigger
     const grow = 1 + (u.tier ?? 0) * 0.035;
-    if (grow !== 1) { c.translate(u.x, groundY); c.scale(grow, grow); c.translate(-u.x, -groundY); }
+    // attack lunge with a little squash & stretch for melee hits
+    const lunge = !u.def.ranged && !u.def.miner && atk > 0 ? atk : 0;
+    const sx = grow * (1 + lunge * 0.07), sy = grow * (1 - lunge * 0.05);
+    c.translate(u.x + f * lunge * 7, groundY); c.scale(sx, sy); c.translate(-u.x, -groundY);
+    if (u.moving && !u.def.flying && !isLowQuality() && Math.sin(u.anim) > 0.95) { c.fillStyle = 'rgba(200,170,120,.35)'; c.beginPath(); c.arc(u.x - f * 10, groundY - 2, 4, 0, 7); c.fill(); }
     drawArt({ c, u, x: u.x, gy, f, t: performance.now() / 1000, swing, atk, side: u.side, region: b.level.region, flash: u.hitFlash > 0, tier: u.tier });
+    if (u.carry > 0) { // gold sack on the miner's back
+      const bx = u.x - f * 10, by = gy - u.def.height * 0.55;
+      c.fillStyle = '#9a6a3a'; c.strokeStyle = '#2a1a0c'; c.lineWidth = 1.5; c.beginPath(); c.ellipse(bx, by, 8, 9, 0, 0, 7); c.fill(); c.stroke();
+      c.fillStyle = '#ffd34d'; c.beginPath(); c.arc(bx, by - 8, 3.5, 0, 7); c.fill();
+    }
     // hit flash: a quick white impact burst (canvas filters stall mobile GPUs)
     if (u.hitFlash > 0) { c.globalAlpha = Math.min(1, u.hitFlash * 6) * 0.7; c.fillStyle = '#fff'; c.beginPath(); c.arc(u.x, gy - u.def.height * 0.55, Math.min(18, u.def.height * 0.2), 0, 7); c.fill(); c.globalAlpha = 1; }
     if (u.healFx > 0) {
@@ -600,7 +636,7 @@ export class Renderer {
     const wide = ['camel', 'cavalry', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss', 'elephant', 'cobra', 'cobraqueen'].includes(def.id) ? 1.5 : 1;
     const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
     ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
-    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, tier };
+    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, carry: 0, tripT: 0, hidden: false, tier };
     const y = def.flying ? GROUND - 30 : GROUND;
     drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 1, swing: 0, atk: 0, side, region: 'oasis', flash: false, tier });
     return cv.toDataURL();

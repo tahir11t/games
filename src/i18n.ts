@@ -218,6 +218,16 @@ const S = {
   seconds: { ar: 'ثانية', en: 'sec' },
   enemyAi: { ar: 'ذكاء الخصم', en: 'Enemy AI' },
   veteran: { ar: 'ترقية ميدانية!', en: 'Field promotion!' },
+  // --- v0.7 ---
+  hideMiners: { ar: 'إخفاء العمّال داخل الحصن', en: 'Hide miners in the fort' },
+  hide: { ar: 'إخفاء', en: 'Hide' },
+  mineUp: { ar: 'تطوير المنجم', en: 'Upgrade mine' },
+  goldRush: { ar: 'اندفاع الذهب! المناجم تنتج الضعف', en: 'Gold rush! Mines yield double' },
+  tapToOpen: { ar: 'اضغط للفتح', en: 'Tap to open' },
+  chest_wood: { ar: 'صندوق خشبي', en: 'Wooden chest' },
+  chest_silver: { ar: 'صندوق فضي', en: 'Silver chest' },
+  chest_gold: { ar: 'صندوق ذهبي', en: 'Golden chest' },
+  rallyHint: { ar: 'المس الأرض لتضع راية التجمّع', en: 'Tap the ground to plant a rally flag' },
   // --- v0.6 ---
   t_rise: { ar: 'الصعود الملحمي', en: 'Epic Rise' },
   t_neon: { ar: 'كثبان النيون', en: 'Neon Dunes' },

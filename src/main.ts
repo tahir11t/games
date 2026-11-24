@@ -380,7 +380,7 @@ function showSettings() {
         <div class="row"><b class="grow">🎥 ${t('camera')}</b>${(['both', 'arrows', 'touch'] as const).map((m) => `<button class="btn small ${save.camMode === m ? '' : 'secondary'}" data-cam="${m}">${t(m === 'both' ? 'camBoth' : m === 'arrows' ? 'camArrows' : 'camTouch')}</button>`).join('')}</div>
         <div class="row"><b class="grow">🖼️ ${t('quality')}</b>${(['auto', 'high', 'low'] as const).map((q) => `<button class="btn small ${save.quality === q ? '' : 'secondary'}" data-q="${q}">${t(('q_' + q) as Key)}</button>`).join('')}</div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v0.6.0</div>
+        <div style="font-size:12px;color:var(--muted)">v0.7.0</div>
       </div>
     </div>
   </div>`);
@@ -625,7 +625,7 @@ function preBattle(index: number) {
 let battle: Battle | null = null;
 let raf = 0;
 let lastT = 0;
-let hudRefs: { gold: HTMLElement; time: HTMLElement; btns: Record<string, HTMLElement>; ability: HTMLElement; mini: HTMLElement; minic: HTMLCanvasElement; tower: HTMLElement; hint: HTMLElement | null; ctrl: HTMLElement; pads: HTMLElement[]; modes: Record<string, HTMLElement> } | null = null;
+let hudRefs: { gold: HTMLElement; time: HTMLElement; btns: Record<string, HTMLElement>; ability: HTMLElement; mini: HTMLElement; minic: HTMLCanvasElement; tower: HTMLElement; mine: HTMLElement; hide: HTMLElement; hint: HTMLElement | null; ctrl: HTMLElement; pads: HTMLElement[]; modes: Record<string, HTMLElement> } | null = null;
 let camHold = 0; // -1 / 1 while a camera arrow is held
 let tutorialStep = 0;
 
@@ -642,6 +642,7 @@ function startLevel(L: LevelDef, bonusGold: number) {
   battle = new Battle(L, perks(L), 150 + bonusGold, {
     onEnd: (win) => setTimeout(() => onBattleEnd(win), 900),
     onWave: (n) => { if (n % 5 === 0) ui.appendChild(h(`<div class="boss-banner">👑 ${t('wave')} ${num(n)}</div>`)); if (n % 3 === 0) setTimeout(() => skillCards(), 400); },
+    onRush: () => { ui.appendChild(h(`<div class="boss-banner rush">⚡ ${t('goldRush')}</div>`)); sfx('coin'); },
     onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
     onUnitTrained: (id) => {
       rolloverDaily();
@@ -736,6 +737,8 @@ function buildHud() {
       <div class="units">${unlockedUnits.map((id) => `<button class="ubtn ${UNITS[id].hero ? 'hero' : ''}" data-u="${id}" aria-label="${tk('u_' + id)}">
         <span class="qn" style="display:none"></span><img src="${unitIcon(id)}" alt=""><span class="cost">${num(b.costOf(id))}</span><span class="prog"></span></button>`).join('')}</div>
       <div class="grow"></div>
+      <button class="tbtn" data-a="hide" title="${t('hideMiners')}">🏠<b data-r="hidelbl">${t('hide')}</b></button>
+      <button class="tbtn" data-a="mine" title="${t('mineUp')}">⛏️<b data-r="mlvl">1/3</b><small data-r="mcost"></small></button>
       <button class="tbtn" data-a="tower" title="${t('towerArcher')}">🏹<b data-r="tcount">1/${MAX_TOWER_ARCHERS}</b><small data-r="tcost"></small></button>
       <button class="cbtn" data-a="ctrl" title="${t('control')}">🎯</button>
       <div class="modes">
@@ -798,6 +801,10 @@ function buildHud() {
   hit.addEventListener('pointerup', hitOff); hit.addEventListener('pointerleave', hitOff); hit.addEventListener('pointercancel', hitOff);
 
   $(el, '[data-a="follow"]').addEventListener('click', () => { renderer.follow = true; sfx('click'); });
+  const hb = $(el, '[data-a="hide"]');
+  hb.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.toggleHide(); });
+  const mb = $(el, '[data-a="mine"]');
+  mb.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.upgradeMine(); });
   const tb = $(el, '[data-a="tower"]');
   tb.addEventListener('pointerdown', (e) => { e.preventDefault(); if (battle?.buyTowerArcher() && battle.towerArchers[0] >= MAX_TOWER_ARCHERS) unlockAch('towers'); });
   const mini = $(el, '[data-r="mini"]');
@@ -809,21 +816,29 @@ function buildHud() {
   });
 
   const minic = $<HTMLCanvasElement>(el, '[data-r="minic"]');
-  hudRefs = { gold: $(el, '[data-r="gold"]'), time: $(el, '[data-r="time"]'), btns, ability, mini, minic, tower: tb, hint: null, ctrl, pads, modes };
+  hudRefs = { gold: $(el, '[data-r="gold"]'), time: $(el, '[data-r="time"]'), btns, ability, mini, minic, tower: tb, mine: mb, hide: hb, hint: null, ctrl, pads, modes };
   placeHint();
 }
 
 // Drag the battlefield to look around.
-let drag: { x: number; cam: number } | null = null;
-canvas.addEventListener('pointerdown', (e) => { if (battle && save.camMode !== 'arrows') { drag = { x: e.clientX, cam: renderer.cam }; } });
+let drag: { x: number; cam: number; pan: boolean } | null = null;
+canvas.addEventListener('pointerdown', (e) => { if (battle) { drag = { x: e.clientX, cam: renderer.cam, pan: save.camMode !== 'arrows' }; } });
 addEventListener('pointermove', (e) => {
-  if (!drag || !battle) return;
+  if (!drag || !battle || !drag.pan) return;
   const dx = (e.clientX - drag.x) * (renderer.viewW / canvas.clientWidth);
   if (Math.abs(dx) > 6) renderer.follow = false;
   renderer.cam = drag.cam - dx;
   renderer.clampCam();
 });
-addEventListener('pointerup', () => (drag = null));
+addEventListener('pointerup', (e) => {
+  // a tap (not a drag) on the battlefield plants the rally flag: the army holds there
+  if (battle && drag && Math.abs(e.clientX - drag.x) < 8 && e.target === canvas && !battle.paused) {
+    const wx = renderer.cam + (e.clientX - canvas.getBoundingClientRect().left) * (renderer.viewW / canvas.clientWidth);
+    battle.setRally(wx);
+    renderer.follow = true;
+  }
+  drag = null;
+});
 
 // Keyboard support (desktop testing).
 addEventListener('keydown', (e) => {
@@ -873,6 +888,14 @@ function updateHud() {
   const ctrlOn = !!b.controlled;
   r.ctrl.classList.toggle('on', ctrlOn);
   r.pads.forEach((p) => (p.style.display = ctrlOn ? 'flex' : 'none'));
+  // mine + hide buttons
+  const mcost = b.mineCost();
+  r.mine.querySelector('[data-r="mlvl"]')!.textContent = `${num(b.mineLevel[0])}/${num(3)}`;
+  r.mine.querySelector('[data-r="mcost"]')!.textContent = isFinite(mcost) ? `🪙${num(mcost)}` : t('max');
+  r.mine.classList.toggle('cant', !isFinite(mcost) || b.gold < mcost);
+  r.hide.classList.toggle('on', b.hideMiners[0]);
+  r.hide.querySelector('[data-r="hidelbl"]')!.textContent = b.hideMiners[0] ? t('release') : t('hide');
+  for (const [m, el2] of Object.entries(r.modes)) el2.classList.toggle('on', m === b.mode);
   // tower archer button
   const tc = b.towerCost();
   r.tower.querySelector('[data-r="tcount"]')!.textContent = `${num(b.towerArchers[0])}/${num(MAX_TOWER_ARCHERS)}`;
@@ -921,6 +944,35 @@ function pauseMenu() {
     if (battle) track('level_fail', { level: battle.level.index, reason: 'quit', seconds: Math.round(battle.time) });
     stopBattleLoop(); if (L) backTo(L); else showCampaign();
   });
+}
+
+// ---------------- Loot chests ----------------
+interface Loot { tier: 'wood' | 'silver' | 'gold'; gold: number; gems: number; upgrade?: UnitId }
+function rollChest(L: LevelDef, stars: number): Loot | null {
+  const bossy = L.boss || L.kind === 'challenge';
+  const chance = bossy ? 1 : L.kind === 'conquest' ? 0.5 : 0.3 + stars * 0.05;
+  if (Math.random() > chance) return null;
+  const roll = Math.random() + (bossy ? 0.45 : 0) + (save.difficulty === 'hard' ? 0.15 : 0);
+  const tier: Loot['tier'] = roll > 1.05 ? 'gold' : roll > 0.65 ? 'silver' : 'wood';
+  const lvl = Math.max(1, L.kind === 'campaign' ? L.index : save.unlocked);
+  const loot: Loot = { tier, gold: Math.round((tier === 'gold' ? 500 : tier === 'silver' ? 280 : 140) + lvl * (tier === 'wood' ? 6 : 10)), gems: tier === 'gold' ? 30 + Math.floor(Math.random() * 30) : tier === 'silver' ? 10 + Math.floor(Math.random() * 15) : 0 };
+  if (tier === 'gold') { // a free upgrade for a unit you use
+    const pool = PLAYER_UNITS.filter((u) => unitAvailable(u) && save.unitLevels[u] < MAX_UNIT_LEVEL);
+    if (pool.length) loot.upgrade = pool[Math.floor(Math.random() * pool.length)];
+  }
+  save.gold += loot.gold; save.gems += loot.gems;
+  if (loot.upgrade) save.unitLevels[loot.upgrade]++;
+  persist();
+  return loot;
+}
+function chestHtml(loot: Loot | null) {
+  if (!loot) return '';
+  const icon = loot.tier === 'gold' ? '👑' : loot.tier === 'silver' ? '💎' : '🪵';
+  return `<button class="chest ${loot.tier}" data-a="chest"><div class="chest-box">🧰<span>${icon}</span></div><small>${tk('chest_' + loot.tier)} · ${t('tapToOpen')}</small>
+    <div class="chest-loot">🪙 ${num(loot.gold)}${loot.gems ? ` · 💎 ${num(loot.gems)}` : ''}${loot.upgrade ? ` · ⬆️ ${tk('u_' + loot.upgrade)} +1` : ''}</div></button>`;
+}
+function bindChest(el: HTMLElement) {
+  el.querySelector('[data-a="chest"]')?.addEventListener('click', (e) => { const btn = e.currentTarget as HTMLElement; if (btn.classList.contains('opened')) return; btn.classList.add('opening'); sfx('volley'); setTimeout(() => { btn.classList.add('opened'); sfx('rank'); }, 700); });
 }
 
 function statsHtml(b: Battle) {
@@ -1006,10 +1058,12 @@ function onBattleEnd(win: boolean) {
     <div class="big-stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? '' : 'off'}" style="animation-delay:${0.2 + i * 0.25}s">★</span>`).join('')}</div>
     <div class="loot"><span class="chip gold-chip" style="font-size:22px">🪙 <b data-r="g">${num(gold)}</b></span>${gems ? `<span class="chip" style="font-size:22px">💎 ${num(gems)}</span>` : ''}</div>
     ${statsHtml(b)}
+    ${chestHtml(rollChest(L, stars))}
     <button class="btn ad" data-a="double">${t('doubleAd')}</button>
     <div class="row"><button class="btn" data-a="next">${t('next')} ${getLang() === 'ar' ? '◀' : '▶'}</button><button class="btn secondary" data-a="menu">${t('campaign')}</button></div>
   </div></div>`);
   ui.appendChild(el);
+  bindChest(el);
   el.querySelector('[data-a="double"]')!.addEventListener('click', async (e) => {
     (e.currentTarget as HTMLButtonElement).disabled = true;
     await showAd('rewarded', 'double_loot');
@@ -1079,10 +1133,12 @@ function onSpecialWin(b: Battle) {
     <h2>${t('victory')} ${L.kind === 'challenge' ? '🏆' : ''}</h2>
     <div class="loot"><span class="chip gold-chip" style="font-size:22px">🪙 ${num(gold)}</span>${gems ? `<span class="chip" style="font-size:22px">💎 ${num(gems)}</span>` : ''}</div>
     ${statsHtml(b)}
+    ${chestHtml(rollChest(L, b.stars(true)))}
     ${unlocked.length ? `<div class="unlock-box"><div style="font-weight:900;color:var(--gold2)">✨ ${t('newUnlock')}</div>${unlocked.map((k) => `<div>${unlockIcon(k)} ${unlockName(k)}</div>`).join('')}</div>` : ''}
     <div class="row">${unlocked.length ? `<button class="btn" data-a="shop">🛒 ${t('shop')}</button>` : ''}<button class="btn secondary" data-a="back">${t('continue')}</button></div>
   </div></div>`);
   ui.appendChild(el);
+  bindChest(el);
   el.querySelector('[data-a="shop"]')?.addEventListener('click', () => { stopBattleLoop(); showShop(unlocked.some((k) => k in UNITS) ? 'units' : unlocked.some((k) => k in ABILITIES) ? 'skills' : 'passives'); });
   el.querySelector('[data-a="back"]')!.addEventListener('click', () => { stopBattleLoop(); flushEvents(); backTo(L); });
 }

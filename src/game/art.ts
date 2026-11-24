@@ -157,6 +157,7 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   if (o.robe) { c.moveTo(x - bw * 0.7, neck - bob); c.lineTo(x + bw * 0.7, neck - bob); c.lineTo(x + bw * 1.15, gy - 2); c.lineTo(x - bw * 1.15, gy - 2); }
   else { c.moveTo(x - bw * 0.75, neck - bob); c.lineTo(x + bw * 0.75, neck - bob); c.lineTo(x + bw * 0.95, hip + 4 - bob); c.lineTo(x - bw * 0.95, hip + 4 - bob); }
   c.closePath(); fillStroke(c, vgrad(c, o.cloth, neck - bob, o.robe ? gy : hip));
+  if (!LOW) { c.save(); c.strokeStyle = 'rgba(255,255,240,.28)'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - f * bw * 0.6, neck + 3 - bob); c.lineTo(x - f * bw * 0.85, (o.robe ? gy - 6 : hip) - bob); c.stroke(); c.restore(); }
   c.fillStyle = o.trim; c.fillRect(x - bw * 0.95, hip - 4 - bob, bw * 1.9, 5); // belt
   if (tier >= 1) {
     const m = METAL[tier];
@@ -170,6 +171,12 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   }
   // head
   circle(c, x, headY - bob, R, o.skin);
+  if (!LOW) { // rim light from the sun (top-left) and a soft chin shadow: volume without heavy filters
+    c.save(); c.strokeStyle = 'rgba(255,255,240,.45)'; c.lineWidth = Math.max(1.5, R * 0.16); c.lineCap = 'round';
+    c.beginPath(); c.arc(x, headY - bob, R * 0.78, Math.PI * 1.05, Math.PI * 1.45); c.stroke();
+    c.fillStyle = 'rgba(40,20,10,.18)'; c.beginPath(); c.ellipse(x, neck - bob + 1, R * 0.55, R * 0.16, 0, 0, 7); c.fill();
+    c.restore();
+  }
   if (o.mask) { c.save(); c.beginPath(); c.arc(x, headY - bob, R - 1.2, 0.15, Math.PI - 0.15); c.closePath(); c.fillStyle = o.mask; c.fill(); c.restore(); }
   if (o.face) o.face(x, headY - bob, R);
   else eyes(c, x, headY - bob - R * 0.05, R, f, !!o.angry, o.glowEyes);

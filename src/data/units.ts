@@ -156,7 +156,9 @@ export const BASE_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel
 
 export const MINER_GOLD = 5;
 export const MINER_INTERVAL = 3;
-export const MAX_MINERS = 8;
+export const MAX_MINERS = 10;
+export const MINE_UPGRADE = [0, 300, 550]; // in-battle mine upgrade prices (level 2, 3)
+export const MINE_YIELD = [1, 1.25, 1.55];
 export const MAX_ARMY = 40;
 export const CONTROL_BONUS = 1.3;
 export const COUNTER_BONUS = 1.75;

@@ -161,6 +161,19 @@ Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on me
 - **Music replaced with 6 modern original tracks:** Epic Rise, Neon Dunes, Desert Trap, Lo-fi Oasis, Night Drive, Hero Anthem.
   - Side-chained supersaws, 808s, FM keys and plucks, risers and impacts, all synthesized live.
 
+## v0.7: mining overhaul, hide miners, rally flag, loot chests, juicier combat
+
+- **Mining:**
+  - Up to 10 miners.
+  - Miners carry gold sacks back to the fort, so their trips are visible and can be raided.
+  - In-battle mine upgrade (3 levels: +25% / +55%).
+  - Random **gold rush** events (double yield for 12 s).
+- **Hide miners** 🏠: a toggle that shelters miners inside the fort, where they can't be hit. Medium/hard commanders hide theirs when raided and upgrade their mines.
+- **Rally flag:** tap the battlefield to plant a flag; the army holds there.
+- **Loot chests** after victories (wooden / silver / golden; bosses always drop one), with an opening animation. Golden chests can include a free unit upgrade.
+- **Combat feel:** melee lunges with squash and stretch, slash arcs, hit sparks, arrow and magic trails, footstep dust, rim lighting on characters.
+- **UI polish:** gradient title, layered panels and buttons, glass chips, vignette backgrounds, scrollable result panel.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

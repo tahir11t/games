@@ -346,4 +346,13 @@ export const TR: Record<string, string> = {
   t_lofi: 'Lo-fi Vaha',
   t_synthwave: 'Gece Sürüşü',
   t_anthem: 'Kahraman Marşı',
+  hideMiners: 'Madencileri kaleye sakla',
+  hide: 'Sakla',
+  mineUp: 'Madeni geliştir',
+  goldRush: 'Altın akını! Madenler iki kat',
+  tapToOpen: 'Açmak için dokun',
+  chest_wood: 'Tahta sandık',
+  chest_silver: 'Gümüş sandık',
+  chest_gold: 'Altın sandık',
+  rallyHint: 'Toplanma bayrağı için yere dokun',
 };
