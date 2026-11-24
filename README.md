@@ -87,6 +87,30 @@ Desktop keys: `1–6` train units · `E` take/release control · `A`/`D` move ·
 
 Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on medium. Run `DIFF=hard UPG_BONUS=3 npx tsx scripts/balance.ts` to check hard.
 
+## v0.4: smooth battles, fort archers, unit looks, camera arrows, achievements
+
+- **Performance:**
+  - Removed the canvas `filter` used for hit flashes and every `shadowBlur` glow. Both stall mobile GPUs and caused hitches when mages or monsters attacked.
+  - The minimap is now drawn on a canvas instead of rebuilding HTML.
+  - Auto quality switches to fast graphics (flat fills, no decorative layers) when frames are slow. You can also set it manually in Settings.
+- **New fort:**
+  - Stone foundation, tapered mud walls with wooden beam ends and stepped battlements.
+  - Tower with arrow slits, a wooden balcony and a flag.
+  - Stone pointed-arch gate with iron-studded doors, flickering torches and a team banner.
+  - Damage states: cracks, holes, broken battlements, fire and smoke.
+- **Fort archers:**
+  - Stronger (20 dmg), faster (1 s) and longer range (500).
+  - Buy a 2nd and 3rd archer during battle for 250 / 450 gold.
+  - On Hard, the enemy commander also adds one.
+- **Unit looks every 5 upgrade levels:**
+  - Level 5: bronze straps and shoulders.
+  - Level 10: silver breastplate and cape.
+  - Level 15: gold armour, plume and a gleaming weapon.
+  - Level 20: legendary aura and sparkles.
+  - Units grow slightly with each tier, and icons update to match.
+- **Camera:** on-screen ◀ ▶ arrows (hold to scroll), a 📍 follow button, and a Settings choice: arrows + touch, arrows only, or touch only.
+- **14 achievements** with gem rewards, a pop-up notice, and an achievements screen.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

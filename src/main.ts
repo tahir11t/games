@@ -8,13 +8,22 @@ import { CHALLENGES, challengeById, challengeLevel, dailyFor, survivalLevel, typ
 import { Battle, W } from './game/battle';
 import { Renderer } from './game/render';
 import { sfx, setSound, setMusicOn, startMusic, stopMusic, unlockAudio, playTrack, TRACKS } from './game/audio';
-import { DIFFICULTY, type Difficulty } from './game/battle';
+import { DIFFICULTY, tierOf, MAX_TOWER_ARCHERS, type Difficulty } from './game/battle';
+import { setLowQuality } from './game/art';
 import { LEVEL_COUNT } from './data/levels';
 
 const ui = document.getElementById('ui')!;
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
-const icons = Object.fromEntries(PLAYER_UNITS.map((id) => [id, Renderer.icon(UNITS[id])])) as Record<UnitId, string>;
+const iconCache = new Map<string, string>();
+/** Unit portrait in its current look (tier changes every 5 upgrade levels). */
+function iconFor(id: UnitId, lvl = save.unitLevels[id] ?? 1) {
+  const tier = tierOf(lvl);
+  const key = id + ':' + tier;
+  let v = iconCache.get(key);
+  if (!v) { v = Renderer.icon(UNITS[id], 96, 0, tier); iconCache.set(key, v); }
+  return v;
+}
 const bossIcons: Record<string, string> = {};
 for (const c of CHALLENGES) bossIcons[c.id] = Renderer.icon(UNITS[c.boss], 96, 1);
 
@@ -45,12 +54,13 @@ function bindDiff(el: HTMLElement, redraw: () => void) {
   el.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { save.difficulty = b.dataset.diff as Difficulty; sfx('click'); persist(); redraw(); }));
 }
 const unlockName = (k: string) => (k in UNITS ? tk('u_' + k) : k in ABILITIES ? tk('a_' + k) : tk('p_' + k));
-const unlockIcon = (k: string) => (k in UNITS ? `<img src="${icons[k as UnitId]}" style="width:40px;height:40px;vertical-align:middle">` : k in ABILITIES ? ABILITIES[k as AbilityId].icon : PASSIVES[k as PassiveId].icon);
+const unlockIcon = (k: string) => (k in UNITS ? `<img src="${iconFor(k as UnitId)}" style="width:40px;height:40px;vertical-align:middle">` : k in ABILITIES ? ABILITIES[k as AbilityId].icon : PASSIVES[k as PassiveId].icon);
 
 function applySettings() {
   setLang(save.lang);
   setSound(save.sound);
   setMusicOn(save.musicOn);
+  setLowQuality(save.quality === 'low');
   document.querySelectorAll<HTMLElement>('[data-t]').forEach((el) => (el.textContent = t(el.dataset.t as Key)));
 }
 
@@ -98,6 +108,56 @@ function showAd(kind: 'rewarded' | 'interstitial', placement: string): Promise<b
   });
 }
 
+// ---------------- Achievements ----------------
+const ACH: { id: string; icon: string; gems: number }[] = [
+  { id: 'first_win', icon: '🏁', gems: 10 }, { id: 'kills_100', icon: '⚔️', gems: 15 }, { id: 'kills_1000', icon: '🗡️', gems: 40 },
+  { id: 'boss', icon: '👑', gems: 20 }, { id: 'stars_30', icon: '⭐', gems: 20 }, { id: 'stars_100', icon: '🌟', gems: 50 },
+  { id: 'veteran', icon: '🎖️', gems: 15 }, { id: 'towers', icon: '🏰', gems: 10 }, { id: 'hard', icon: '🔥', gems: 25 },
+  { id: 'survivor', icon: '♾️', gems: 25 }, { id: 'hunter', icon: '🐲', gems: 40 }, { id: 'raider', icon: '⛏️', gems: 20 },
+  { id: 'legend', icon: '💠', gems: 30 }, { id: 'campaign', icon: '🏆', gems: 100 },
+];
+function toast(html: string) {
+  const el = h(`<div class="toast">${html}</div>`);
+  document.getElementById('app')!.appendChild(el);
+  setTimeout(() => el.remove(), 3400);
+}
+function unlockAch(id: string) {
+  if (save.achievements.includes(id)) return;
+  const a = ACH.find((x) => x.id === id);
+  if (!a) return;
+  save.achievements.push(id);
+  save.gems += a.gems;
+  persist();
+  sfx('rank');
+  track('achievement', { id });
+  toast(`<span class="toast-ico">${a.icon}</span><div><b>${t('achUnlocked')}</b><div>${tk('ach_' + id)} · 💎 ${num(a.gems)}</div></div>`);
+}
+function checkAchievements(b?: Battle, win?: boolean) {
+  if (b) {
+    save.totals.kills += b.stats.kills;
+    save.totals.bosses += b.stats.bossKills;
+    if (win) unlockAch('first_win');
+    if (win && save.difficulty === 'hard' && b.level.kind !== 'survival') unlockAch('hard');
+    if (b.stats.enemyMinersKilled >= 10) unlockAch('raider');
+  }
+  if (save.totals.kills >= 100) unlockAch('kills_100');
+  if (save.totals.kills >= 1000) unlockAch('kills_1000');
+  if (save.totals.bosses > 0) unlockAch('boss');
+  if (totalStars() >= 30) unlockAch('stars_30');
+  if (totalStars() >= 100) unlockAch('stars_100');
+  if (save.survivalBest >= 10) unlockAch('survivor');
+  if (CHALLENGES.filter((c) => save.trophies[c.id]).length >= 5) unlockAch('hunter');
+  if (Object.values(save.unitLevels).some((l) => l >= 20)) unlockAch('legend');
+  if (save.stars[50]) unlockAch('campaign');
+  persist();
+}
+function showAchievements() {
+  const el = h(`<div class="screen">${topbar()}
+    <div class="ach-grid">${ACH.map((a) => { const got = save.achievements.includes(a.id); return `<div class="ach ${got ? 'got' : ''}"><div class="ach-ico">${got ? a.icon : '🔒'}</div><div class="meta"><b>${tk('ach_' + a.id)}</b><small>${tk('achd_' + a.id)}</small></div><span class="chip">💎 ${num(a.gems)}</span></div>`; }).join('')}</div>
+  </div>`);
+  mount(el);
+}
+
 // ---------------- Menu ----------------
 function showMenu() {
   stopBattleLoop();
@@ -115,6 +175,7 @@ function showMenu() {
           <button class="btn secondary" data-go="shop">🛒 ${t('shop')}</button>
           <button class="btn secondary" data-go="upgrades">⚔️ ${t('upgrades')}</button>
           <button class="btn secondary" data-go="rewards">🎁 ${t('daily')}${rewardsBadge() ? ' •' : ''}</button>
+          <button class="btn secondary" data-go="ach">🏅 ${t('achievements')} <small>${num(save.achievements.length)}/${num(ACH.length)}</small></button>
           <button class="btn secondary" data-go="settings">⚙️ ${t('settings')}</button>
         </div>
       </div>
@@ -129,6 +190,7 @@ function showMenu() {
     if (go === 'upgrades') showUpgrades();
     if (go === 'rewards') showRewards();
     if (go === 'settings') showSettings();
+    if (go === 'ach') showAchievements();
   }));
   mount(el);
 }
@@ -171,11 +233,11 @@ function showUpgrades() {
       const cost = upgradeCost(lvl, id);
       const m = upgradeMult(lvl);
       return `<div class="card ${locked ? 'locked' : ''}">
-        <img src="${icons[id]}" alt="">
+        <img src="${iconFor(id)}" alt="">
         <div class="meta">
-          <div class="name">${tk('u_' + id)} <span style="color:var(--gold2)">Lv ${num(lvl)}</span></div>
+          <div class="name">${tk('u_' + id)} <span style="color:var(--gold2)">Lv ${num(lvl)}</span>${tierOf(lvl) ? ` <span class="tier t${tierOf(lvl)}">${t(('tier_' + tierOf(lvl)) as Key)}</span>` : ''}</div>
           <div class="stat">${t('hp')} ${num(Math.round(d.hp * m))} · ${d.heal ? '✚ ' + num(Math.round(d.heal * m)) : t('dmg') + ' ' + num(Math.round(d.dmg * m))}</div>
-          ${locked ? `<div class="stat">🔒 ${t('unlocksAt')} ${num(d.unlock)}</div>` : ''}
+          ${locked ? `<div class="stat">🔒 ${t('unlocksAt')} ${num(d.unlock)}</div>` : lvl < MAX_UNIT_LEVEL ? `<div class="stat">✨ ${t('nextLook')} ${num(Math.min(20, (tierOf(lvl) + 1) * 5))}</div>` : ''}
         </div>
         ${locked ? '' : lvl >= MAX_UNIT_LEVEL ? `<span class="chip">${t('max')}</span>` :
         `<button class="btn small" data-up="${id}" ${save.gold < cost ? 'disabled' : ''}>🪙 ${num(cost)}</button>`}
@@ -188,8 +250,9 @@ function showUpgrades() {
     if (save.gold < cost) return;
     save.gold -= cost;
     save.unitLevels[id]++;
-    sfx('coin');
+    if (tierOf(save.unitLevels[id]) > tierOf(save.unitLevels[id] - 1)) sfx('rank'); else sfx('coin');
     track('upgrade_purchased', { unit: id, level: save.unitLevels[id], cost });
+    if (save.unitLevels[id] >= 20) unlockAch('legend');
     persist();
     showUpgrades();
   }));
@@ -289,8 +352,10 @@ function showSettings() {
         <div class="row"><b class="grow">🎵 ${t('music')}</b><button class="btn small ${save.musicOn ? '' : 'secondary'}" data-a="music">${save.musicOn ? t('on') : t('off')}</button>
           <b>🔊 ${t('sfx')}</b><button class="btn small ${save.sound ? '' : 'secondary'}" data-a="sound">${save.sound ? t('on') : t('off')}</button></div>
         <div class="tracks">${['auto', ...TRACKS.map((x) => x.id)].map((id) => `<button class="track ${save.music === id ? 'on' : ''}" data-track="${id}">${id === 'auto' ? '✨ ' + t('auto') : '🎶 ' + tk('t_' + id)}</button>`).join('')}</div>
+        <div class="row"><b class="grow">🎥 ${t('camera')}</b>${(['both', 'arrows', 'touch'] as const).map((m) => `<button class="btn small ${save.camMode === m ? '' : 'secondary'}" data-cam="${m}">${t(m === 'both' ? 'camBoth' : m === 'arrows' ? 'camArrows' : 'camTouch')}</button>`).join('')}</div>
+        <div class="row"><b class="grow">🖼️ ${t('quality')}</b>${(['auto', 'high', 'low'] as const).map((q) => `<button class="btn small ${save.quality === q ? '' : 'secondary'}" data-q="${q}">${t(('q_' + q) as Key)}</button>`).join('')}</div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v0.3.0</div>
+        <div style="font-size:12px;color:var(--muted)">v0.4.0</div>
       </div>
     </div>
   </div>`);
@@ -304,6 +369,8 @@ function showSettings() {
     if (save.music === 'auto') startMusic('menu', 'auto'); else playTrack(save.music);
     showSettings();
   }));
+  el.querySelectorAll<HTMLElement>('[data-cam]').forEach((b) => b.addEventListener('click', () => { save.camMode = b.dataset.cam as 'both' | 'arrows' | 'touch'; persist(); sfx('click'); showSettings(); }));
+  el.querySelectorAll<HTMLElement>('[data-q]').forEach((b) => b.addEventListener('click', () => { save.quality = b.dataset.q as 'auto' | 'high' | 'low'; setLowQuality(save.quality === 'low'); persist(); sfx('click'); showSettings(); }));
   bindDiff(el, showSettings);
   mount(el);
 }
@@ -380,7 +447,7 @@ function showShop(tab: ShopTab) {
       const own = save.owned.includes(id);
       const lock = reqHtml(r);
       return `<div class="card shop ${own ? 'owned' : ''} ${lock ? 'locked' : ''}">
-        <img src="${icons[id]}" alt="">
+        <img src="${iconFor(id)}" alt="">
         <div class="meta"><div class="name">${tk('u_' + id)}</div>
           <div class="stat">${tk('ud_' + id)}</div>
           <div class="stat">🪙${num(d.cost)} · ${t('hp')} ${num(d.hp)} · ${d.heal ? '✚ ' + num(d.heal) : t('dmg') + ' ' + num(d.dmg)}${d.flying ? ' · 🪽' : ''}</div>
@@ -473,7 +540,8 @@ function preBattle(index: number) {
 let battle: Battle | null = null;
 let raf = 0;
 let lastT = 0;
-let hudRefs: { gold: HTMLElement; time: HTMLElement; btns: Record<string, HTMLElement>; ability: HTMLElement; mini: HTMLElement; view: HTMLElement; hint: HTMLElement | null; ctrl: HTMLElement; pads: HTMLElement[]; modes: Record<string, HTMLElement> } | null = null;
+let hudRefs: { gold: HTMLElement; time: HTMLElement; btns: Record<string, HTMLElement>; ability: HTMLElement; mini: HTMLElement; minic: HTMLCanvasElement; tower: HTMLElement; hint: HTMLElement | null; ctrl: HTMLElement; pads: HTMLElement[]; modes: Record<string, HTMLElement> } | null = null;
+let camHold = 0; // -1 / 1 while a camera arrow is held
 let tutorialStep = 0;
 
 function stopBattleLoop() { cancelAnimationFrame(raf); battle = null; }
@@ -488,7 +556,7 @@ function startLevel(L: LevelDef, bonusGold: number) {
   battle = new Battle(L, perks(), 150 + bonusGold, {
     onEnd: (win) => setTimeout(() => onBattleEnd(win), 900),
     onWave: (n) => { if (n % 5 === 0) ui.appendChild(h(`<div class="boss-banner">👑 ${t('wave')} ${num(n)}</div>`)); },
-    onRank: () => sfx('rank'),
+    onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
     onUnitTrained: (id) => {
       rolloverDaily();
       save.quests.units++;
@@ -541,15 +609,17 @@ function buildHud() {
     <div class="hud-top">
       <span class="chip gold-chip" style="font-size:20px"><span class="ico">🪙</span><b data-r="gold">0</b></span>
       <span class="chip">⏱ <b data-r="time">0:00</b></span>
-      <div class="minimap" data-r="mini"><div class="view" data-r="view"></div></div>
+      <div class="minimap" data-r="mini"><canvas data-r="minic"></canvas></div>
+      <button class="btn secondary small" data-a="follow" title="${t('follow')}">📍</button>
       <span class="chip">${kindLabel}</span>
       <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">▶${save.speed === 2 ? '▶' : ''} ×${save.speed}</button>
       <button class="btn secondary small" data-a="pause" aria-label="pause">II</button>
     </div>
     <div class="hud-bottom">
       <div class="units">${PLAYER_UNITS.filter((id) => unlockedUnits.includes(id)).map((id) => `<button class="ubtn ${unlockedUnits.includes(id) ? '' : 'locked'}" data-u="${id}" aria-label="${tk('u_' + id)}">
-        <span class="qn" style="display:none"></span><img src="${icons[id]}" alt=""><span class="cost">${num(UNITS[id].cost)}</span><span class="prog"></span></button>`).join('')}</div>
+        <span class="qn" style="display:none"></span><img src="${iconFor(id)}" alt=""><span class="cost">${num(UNITS[id].cost)}</span><span class="prog"></span></button>`).join('')}</div>
       <div class="grow"></div>
+      <button class="tbtn" data-a="tower" title="${t('towerArcher')}">🏹<b data-r="tcount">1/${MAX_TOWER_ARCHERS}</b><small data-r="tcost"></small></button>
       <button class="cbtn" data-a="ctrl" title="${t('control')}">🎯</button>
       <div class="modes">
         <button class="mbtn" data-m="attack">⚔ ${t('attack')}</button>
@@ -559,12 +629,20 @@ function buildHud() {
       <button class="abtn" data-a="ability" title="${tk('a_' + save.ability)}">${ABILITIES[save.ability].icon}</button>
     </div>
   </div>`);
+  const camArrows = save.camMode !== 'touch' ? [h(`<button class="cam-arrow left" data-cam="-1" aria-label="left">◀</button>`), h(`<button class="cam-arrow right" data-cam="1" aria-label="right">▶</button>`)] : [];
   const pads = [
     h(`<div class="pad left" style="display:none"><button class="pbtn" data-d="-1">◀</button><button class="pbtn" data-d="1">▶</button></div>`),
     h(`<div class="pad right" style="display:none"><button class="pbtn hit" data-a="hit">⚔</button></div>`),
   ];
   mount(el);
   pads.forEach((p) => ui.appendChild(p));
+  camArrows.forEach((a) => {
+    ui.appendChild(a);
+    const dir = Number(a.dataset.cam);
+    const on = (e: Event) => { e.preventDefault(); camHold = dir; renderer.follow = false; a.classList.add('held'); };
+    const off = () => { if (camHold === dir) camHold = 0; a.classList.remove('held'); };
+    a.addEventListener('pointerdown', on); a.addEventListener('pointerup', off); a.addEventListener('pointerleave', off); a.addEventListener('pointercancel', off);
+  });
 
   const btns: Record<string, HTMLElement> = {};
   el.querySelectorAll<HTMLElement>('[data-u]').forEach((btn) => {
@@ -602,6 +680,9 @@ function buildHud() {
   const hitOff = () => { if (battle) battle.ctrlAttack = false; hit.classList.remove('held'); };
   hit.addEventListener('pointerup', hitOff); hit.addEventListener('pointerleave', hitOff); hit.addEventListener('pointercancel', hitOff);
 
+  $(el, '[data-a="follow"]').addEventListener('click', () => { renderer.follow = true; sfx('click'); });
+  const tb = $(el, '[data-a="tower"]');
+  tb.addEventListener('pointerdown', (e) => { e.preventDefault(); if (battle?.buyTowerArcher() && battle.towerArchers[0] >= MAX_TOWER_ARCHERS) unlockAch('towers'); });
   const mini = $(el, '[data-r="mini"]');
   mini.addEventListener('pointerdown', (e) => {
     const r = mini.getBoundingClientRect();
@@ -610,13 +691,14 @@ function buildHud() {
     renderer.clampCam();
   });
 
-  hudRefs = { gold: $(el, '[data-r="gold"]'), time: $(el, '[data-r="time"]'), btns, ability, mini, view: $(el, '[data-r="view"]'), hint: null, ctrl, pads, modes };
+  const minic = $<HTMLCanvasElement>(el, '[data-r="minic"]');
+  hudRefs = { gold: $(el, '[data-r="gold"]'), time: $(el, '[data-r="time"]'), btns, ability, mini, minic, tower: tb, hint: null, ctrl, pads, modes };
   placeHint();
 }
 
 // Drag the battlefield to look around.
 let drag: { x: number; cam: number } | null = null;
-canvas.addEventListener('pointerdown', (e) => { if (battle) { drag = { x: e.clientX, cam: renderer.cam }; } });
+canvas.addEventListener('pointerdown', (e) => { if (battle && save.camMode !== 'arrows') { drag = { x: e.clientX, cam: renderer.cam }; } });
 addEventListener('pointermove', (e) => {
   if (!drag || !battle) return;
   const dx = (e.clientX - drag.x) * (renderer.viewW / canvas.clientWidth);
@@ -668,23 +750,35 @@ function updateHud() {
   const ctrlOn = !!b.controlled;
   r.ctrl.classList.toggle('on', ctrlOn);
   r.pads.forEach((p) => (p.style.display = ctrlOn ? 'flex' : 'none'));
-  // minimap
-  r.view.style.left = `${(renderer.cam / W) * 100}%`;
-  r.view.style.width = `${(renderer.viewW / W) * 100}%`;
-  const dots = b.units.filter((u) => !u.dead && u.def.id !== 'miner');
-  let html = `<div class="view" style="left:${(renderer.cam / W) * 100}%;width:${(renderer.viewW / W) * 100}%"></div>`;
-  for (let i = 0; i < dots.length; i += dots.length > 50 ? 2 : 1) html += `<i style="left:${(dots[i].x / W) * 100}%;background:${dots[i].side ? '#e0453a' : '#ffd34d'}"></i>`;
-  r.mini.innerHTML = html;
-  r.view = r.mini.firstElementChild as HTMLElement;
+  // tower archer button
+  const tc = b.towerCost();
+  r.tower.querySelector('[data-r="tcount"]')!.textContent = `${num(b.towerArchers[0])}/${num(MAX_TOWER_ARCHERS)}`;
+  r.tower.querySelector('[data-r="tcost"]')!.textContent = isFinite(tc) ? `🪙${num(tc)}` : t('max');
+  r.tower.classList.toggle('cant', !isFinite(tc) || b.gold < tc);
+  // minimap (canvas: no DOM churn)
+  const mc = r.minic, mx = mc.getContext('2d')!;
+  if (mc.width !== mc.clientWidth * 2) { mc.width = mc.clientWidth * 2; mc.height = mc.clientHeight * 2; }
+  const k = mc.width / W;
+  mx.clearRect(0, 0, mc.width, mc.height);
+  for (const u of b.units) { if (u.dead || u.def.id === 'miner') continue; mx.fillStyle = u.side ? '#e0453a' : '#ffd34d'; mx.fillRect(u.x * k - 2, u.def.flying ? 4 : 12, u.def.boss ? 8 : 4, u.def.boss ? 14 : 10); }
+  mx.strokeStyle = 'rgba(255,255,255,.8)'; mx.lineWidth = 3; mx.strokeRect(renderer.cam * k, 2, renderer.viewW * k, mc.height - 4);
 }
 
 let hudTick = 0;
+let frameAvg = 16, slowFrames = 0, lastFrame = performance.now();
 function loop(now: number) {
   if (!battle) return;
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   for (let k = 0; k < save.speed; k++) battle.update(dt);
+  if (camHold) { renderer.follow = false; renderer.cam += camHold * 900 * dt; renderer.clampCam(); }
   renderer.autoCam(battle, dt * save.speed);
+  // auto quality: if frames are slow for a couple of seconds, switch to fast graphics
+  if (save.quality === 'auto') {
+    frameAvg = frameAvg * 0.97 + (now - lastFrame) * 0.03;
+    if (frameAvg > 26 && ++slowFrames > 120) { setLowQuality(true); slowFrames = -100000; }
+  }
+  lastFrame = now;
   renderer.draw(battle);
   if ((hudTick = (hudTick + 1) % 3) === 0) updateHud();
   raf = requestAnimationFrame(loop);
@@ -712,7 +806,7 @@ function statsHtml(b: Battle) {
   const row = (icon: string, k: Key, v: number) => `<div class="stat-cell"><span>${icon}</span><b>${num(Math.round(v))}</b><small>${t(k)}</small></div>`;
   return `<div class="stats-box">
     ${row('⚔️', 'st_kills', s.kills)}${row('💀', 'st_lost', s.lost)}${row('🛡️', 'st_trained', s.trained)}${row('🪙', 'st_mined', s.mined)}${b.level.ai ? row('⛏️', 'st_minersKilled', s.enemyMinersKilled) : ''}
-    ${mvp ? `<div class="stat-cell mvp"><img src="${icons[mvp[0]]}" alt=""><small>${t('mvp')}: ${tk('u_' + mvp[0])}</small></div>` : ''}
+    ${mvp ? `<div class="stat-cell mvp"><img src="${iconFor(mvp[0])}" alt=""><small>${t('mvp')}: ${tk('u_' + mvp[0])}</small></div>` : ''}
   </div>`;
 }
 
@@ -729,6 +823,7 @@ function onBattleEnd(win: boolean) {
   stopMusic();
   sfx(win ? 'win' : 'lose');
   const L = b.level;
+  setTimeout(() => checkAchievements(b, win), 1200);
   if (!win) {
     const canRevive = !b.revived && L.kind !== 'survival'; // survival pays out on the spot
     const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result lose col" style="align-items:center">
@@ -870,4 +965,4 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();
 });
 // Dev-only hook for automated UI tests.
-if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, save, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges };
+if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges };

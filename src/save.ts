@@ -30,6 +30,10 @@ export interface SaveData {
   music: string; // track id or 'auto'
   musicOn: boolean;
   speed: 1 | 2;
+  camMode: 'both' | 'arrows' | 'touch';
+  quality: 'auto' | 'high' | 'low';
+  achievements: string[];
+  totals: { kills: number; bosses: number };
   dailyDone: string | null;
   updatedAt: number;
 }
@@ -39,7 +43,7 @@ const KEY = 'sandwars.save.v1';
 /** Fill in fields added after a save was written (shallow + nested maps). */
 export function migrate(raw: Partial<SaveData>): SaveData {
   const d = defaultSave();
-  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies } };
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals } };
 }
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -69,6 +73,10 @@ export function defaultSave(): SaveData {
     music: 'auto',
     musicOn: true,
     speed: 1,
+    camMode: 'both',
+    quality: 'auto',
+    achievements: [],
+    totals: { kills: 0, bosses: 0 },
     survivalBest: 0,
     dailyDone: null,
     updatedAt: Date.now(),

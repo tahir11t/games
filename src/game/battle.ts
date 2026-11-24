@@ -9,7 +9,11 @@ export const H = 540;
 export const GROUND = 385;
 export const CASTLE_X = [130, W - 130];
 export const MINE_X = [340, W - 340];
-export const TOWER_RANGE = 360;
+export const TOWER_RANGE = [500, 400]; // player fort archers see further
+export const TOWER_COST = [0, 250, 450]; // price of the 2nd and 3rd fort archer
+export const MAX_TOWER_ARCHERS = 3;
+/** Visual tier from upgrade level: a new look every 5 levels. */
+export const tierOf = (lvl: number) => Math.min(4, Math.floor(lvl / 5));
 
 export type Mode = 'defend' | 'hold' | 'attack';
 export type Side = 0 | 1;
@@ -45,6 +49,7 @@ export interface Unit {
   rank: number; // veteran rank 0..MAX_RANK
   raid: boolean; // enemy raider: hunts miners
   lastDx: number; // movement last frame (for queueing)
+  tier: number; // visual tier 0..4
 }
 
 export interface Projectile {
@@ -62,7 +67,7 @@ export interface Particle { x: number; y: number; vx: number; vy: number; life: 
 export interface FloatText { x: number; y: number; text: string; life: number; color: string; size?: number; }
 export interface QueueItem { id: EnemyId; left: number; }
 
-export interface BattleStats { trained: number; kills: number; lost: number; mined: number; damage: Partial<Record<UnitId, number>>; enemyMinersKilled: number; }
+export interface BattleStats { trained: number; kills: number; lost: number; mined: number; damage: Partial<Record<UnitId, number>>; enemyMinersKilled: number; bossKills: number; }
 
 export interface BattleEvents {
   onEnd(win: boolean): void;
@@ -116,7 +121,8 @@ export class Battle {
   survivalWave = 0;
   towerCd: [number, number] = [1, 2];
   towerShot: [number, number] = [0, 0]; // anim timers
-  stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0 };
+  towerArchers: [number, number] = [1, 0];
+  stats: BattleStats = { trained: 0, kills: 0, lost: 0, mined: 0, damage: {}, enemyMinersKilled: 0, bossKills: 0 };
   private survivalNext = 8;
   private passiveIncome = 0;
   private auras: Unit[] = [];
@@ -139,6 +145,7 @@ export class Battle {
       this.spawn('miner', 0);
       this.spawn('miner', 0).x += 20;
     }
+    this.towerArchers[1] = (level.towerDmg ?? 0) > 0 ? 1 : 0;
     if (level.ai) {
       this.egold = level.ai.startGold;
       this.spawn('miner', 1);
@@ -193,12 +200,24 @@ export class Battle {
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
       chargeReady: !!def.charge, calm: 0, mineTimer: Math.random() * 2, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0,
+      tier: side === 0 ? tierOf(this.perks.unitLevels[id as UnitId] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
     return u;
   }
 
   setMode(m: Mode) { this.mode = m; sfx('click'); }
+
+  towerCost() { return this.towerArchers[0] < MAX_TOWER_ARCHERS ? TOWER_COST[this.towerArchers[0]] : Infinity; }
+  buyTowerArcher() {
+    const cost = this.towerCost();
+    if (this.gold < cost) return false;
+    this.gold -= cost;
+    this.towerArchers[0]++;
+    sfx('coin');
+    this.texts.push({ x: CASTLE_X[0] - 60, y: GROUND - 260, text: '🏹+1', life: 1.2, color: '#ffe066', size: 20 });
+    return true;
+  }
 
   // ---------------- Commander abilities ----------------
   useAbility() {
@@ -468,6 +487,8 @@ export class Battle {
       const fast = army.filter((u) => u.def.speed >= 90 && !u.def.flying).slice(0, 2);
       if (this.units.some((u) => u.side === 0 && u.def.id === 'miner' && !u.dead)) for (const u of fast) u.raid = true;
     }
+    // Hard AI reinforces its fort with a second archer once it is rich.
+    if (ai === 3 && this.towerArchers[1] === 1 && this.egold > 520 && this.time > 70) { this.egold -= 300; this.towerArchers[1] = 2; }
     // Hard AI uses an arrow volley on your densest group.
     if (ai === 3 && this.eability >= 1) {
       const targets = this.playerArmy.filter((u) => u.def.id !== 'miner');
@@ -683,18 +704,25 @@ export class Battle {
   private updateTowers(dt: number) {
     for (const side of [0, 1] as Side[]) {
       this.towerShot[side] = Math.max(0, this.towerShot[side] - dt);
-      const dmg = side === 0 ? 11 * passiveFx.towers(this.perks.passives.towers) : (this.level.towerDmg ?? 0) * this.diff.tower;
-      if (!dmg || !isFinite(this.castleHp[side]) && side === 1) continue;
+      const n = this.towerArchers[side];
+      if (!n || (side === 1 && !isFinite(this.castleHp[1]))) continue;
+      const dmg = side === 0 ? 20 * passiveFx.towers(this.perks.passives.towers) : (this.level.towerDmg ?? 0) * this.diff.tower;
+      if (!dmg) continue;
       this.towerCd[side] -= dt;
       if (this.towerCd[side] > 0) continue;
-      const tx = CASTLE_X[side] + (side === 0 ? -90 : 90);
-      let best: Unit | null = null, bd = TOWER_RANGE;
-      for (const o of this.units) if (o.side !== side && !o.dead) { const d = Math.abs(o.x - tx); if (d < bd) { bd = d; best = o; } }
-      if (!best) { this.towerCd[side] = 0.3; continue; }
-      this.towerCd[side] = 1.5;
+      const fx = CASTLE_X[side] + (side === 0 ? -60 : 60);
+      const range = TOWER_RANGE[side];
+      const foes = this.units.filter((o) => o.side !== side && !o.dead && Math.abs(o.x - fx) < range).sort((a, z) => Math.abs(a.x - fx) - Math.abs(z.x - fx));
+      if (!foes.length) { this.towerCd[side] = 0.25; continue; }
+      this.towerCd[side] = side === 0 ? 1.0 : 1.4;
       this.towerShot[side] = 0.3;
-      const sy = GROUND - 238;
-      this.projectiles.push({ x: tx, y: sy, vx: 0, vy: 0, sx: tx, sy, tx: best.x, ty: this.unitY(best) - best.def.height * 0.5, t: 0, T: Math.max(0.35, bd / 600), arc: 30, side, dmg, splash: 0, kind: 'arrow', target: best, air: true });
+      // Each fort archer looses an arrow, spreading over the closest targets.
+      for (let k = 0; k < n; k++) {
+        const t = foes[k % foes.length];
+        const sx = fx + (side === 0 ? 1 : -1) * (k === 0 ? -30 : k === 1 ? 10 : 55), sy = GROUND - (k === 0 ? 250 : 180);
+        const d = Math.abs(t.x - sx);
+        this.projectiles.push({ x: sx, y: sy, vx: 0, vy: 0, sx, sy, tx: t.x, ty: this.unitY(t) - t.def.height * 0.5, t: -k * 0.12, T: Math.max(0.3, d / 650), arc: 25 + d * 0.06, side, dmg, splash: 0, kind: 'arrow', target: t, air: true });
+      }
     }
   }
 
@@ -831,6 +859,7 @@ export class Battle {
       if (o.side === 1) {
         this.stats.kills++;
         if (o.def.id === 'miner') this.stats.enemyMinersKilled++;
+        if (o.def.boss) this.stats.bossKills++;
         const bounty = Math.round((o.def.boss ? 200 : 8 + o.def.hp / 25) * (this.level.mods?.goldMult ?? 1));
         this.gold += bounty;
         this.texts.push({ x: o.x, y: GROUND - 70, text: `+${bounty}`, life: 1, color: '#ffd34d' });

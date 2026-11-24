@@ -10,10 +10,26 @@ const TRIM = ['#b5791f', '#6e1a12'];
 
 type C = CanvasRenderingContext2D;
 
-export interface ArtCtx { c: C; u: Unit; x: number; gy: number; f: number; t: number; swing: number; atk: number; side: 0 | 1; region: RegionId; flash: boolean; }
+export interface ArtCtx { c: C; u: Unit; x: number; gy: number; f: number; t: number; swing: number; atk: number; side: 0 | 1; region: RegionId; flash: boolean; tier?: number; }
+
+/** Armour metal by visual tier (a new look every 5 upgrade levels). */
+const METAL = ['', '#c98a4a', '#d5dde5', '#ffcf3d', '#ffe27a'];
 
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 
+// ---- performance: low-quality mode drops gradients on slow devices ----
+let LOW = false;
+export function setLowQuality(on: boolean) { LOW = on; }
+export function isLowQuality() { return LOW; }
+/** Cheap glow (canvas blur stalls mobile GPUs): a few soft discs. */
+export function glowDot(c: C, x: number, y: number, r: number, color: string, core = '#ffffff') {
+  c.save();
+  c.globalAlpha *= 0.25; c.fillStyle = color; c.beginPath(); c.arc(x, y, r * 2.2, 0, 7); c.fill();
+  c.globalAlpha *= 1.8; c.beginPath(); c.arc(x, y, r * 1.4, 0, 7); c.fill();
+  c.restore();
+  c.fillStyle = color; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  c.save(); c.globalAlpha *= 0.8; c.fillStyle = core; c.beginPath(); c.arc(x - r * 0.25, y - r * 0.25, r * 0.4, 0, 7); c.fill(); c.restore();
+}
 // ---- shading: every shape gets a light top and a darker bottom for volume ----
 const shadeCache = new Map<string, string>();
 export function shade(hex: string, amt: number): string {
@@ -28,13 +44,13 @@ export function shade(hex: string, amt: number): string {
   return out;
 }
 function vgrad(c: C, fill: string, y0: number, y1: number) {
-  if (!fill.startsWith('#')) return fill;
+  if (LOW || !fill.startsWith('#')) return fill;
   const g = c.createLinearGradient(0, y0, 0, y1);
   g.addColorStop(0, shade(fill, 0.22)); g.addColorStop(0.55, fill); g.addColorStop(1, shade(fill, -0.22));
   return g;
 }
 function rgrad(c: C, fill: string, x: number, y: number, r: number) {
-  if (!fill.startsWith('#')) return fill;
+  if (LOW || !fill.startsWith('#')) return fill;
   const g = c.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.05);
   g.addColorStop(0, shade(fill, 0.3)); g.addColorStop(0.6, fill); g.addColorStop(1, shade(fill, -0.2));
   return g;
@@ -45,7 +61,7 @@ function ellipse(c: C, x: number, y: number, rx: number, ry: number, fill: strin
 function line(c: C, x1: number, y1: number, x2: number, y2: number, color: string, w: number) {
   c.save(); c.strokeStyle = OUT; c.lineWidth = w + 2.6; c.lineCap = 'round'; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
   c.strokeStyle = color; c.lineWidth = w; c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
-  if (color.startsWith('#') && w >= 3) { c.strokeStyle = shade(color, 0.35); c.lineWidth = w * 0.3; c.beginPath(); c.moveTo(x1 - 0.8, y1 - 0.8); c.lineTo(x2 - 0.8, y2 - 0.8); c.stroke(); }
+  if (!LOW && color.startsWith('#') && w >= 3) { c.strokeStyle = shade(color, 0.35); c.lineWidth = w * 0.3; c.beginPath(); c.moveTo(x1 - 0.8, y1 - 0.8); c.lineTo(x2 - 0.8, y2 - 0.8); c.stroke(); }
   c.restore();
 }
 function poly(c: C, pts: number[], fill: string, lw = 2.2) {
@@ -58,7 +74,7 @@ function poly(c: C, pts: number[], fill: string, lw = 2.2) {
 function eyes(c: C, x: number, y: number, r: number, f: number, angry: boolean, glow?: string) {
   for (const k of [0.12, 0.58]) {
     const ex = x + f * r * k;
-    if (glow) { c.save(); c.fillStyle = glow; c.shadowColor = glow; c.shadowBlur = 8; c.beginPath(); c.ellipse(ex, y, r * 0.15, r * 0.2, 0, 0, 7); c.fill(); c.restore(); continue; }
+    if (glow) { c.save(); c.fillStyle = glow; c.globalAlpha *= 0.35; c.beginPath(); c.ellipse(ex, y, r * 0.28, r * 0.32, 0, 0, 7); c.fill(); c.globalAlpha /= 0.35; c.beginPath(); c.ellipse(ex, y, r * 0.15, r * 0.2, 0, 0, 7); c.fill(); c.restore(); continue; }
     c.fillStyle = '#fff'; c.beginPath(); c.ellipse(ex, y, r * 0.17, r * 0.23, 0, 0, 7); c.fill();
     c.fillStyle = '#1b1b1b'; c.beginPath(); c.arc(ex + f * r * 0.06, y + r * 0.03, r * 0.1, 0, 7); c.fill();
     if (angry) { c.strokeStyle = OUT; c.lineWidth = 2.2; c.beginPath(); c.moveTo(ex - r * 0.2, y - r * 0.32 - (f * (k < 0.3 ? -1 : 1)) * 0); c.lineTo(ex + r * 0.2, y - r * 0.24 + (k < 0.3 ? -f : f) * r * 0.08); c.stroke(); }
@@ -83,6 +99,11 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   const legL = h * 0.3;
   const bob = a.u.moving ? Math.abs(Math.sin(a.u.anim)) * 2 : Math.sin(a.t * 2.4 + a.u.uid) * 0.8; // walk bounce / idle breathing
   c.strokeStyle = OUT; c.lineJoin = 'round'; c.lineCap = 'round';
+  const tier = a.tier ?? 0;
+  if (tier >= 2 && !o.noLegs) { // flowing cape
+    const capeCol = tier >= 3 ? '#8e1b1b' : shade(o.cloth, -0.3);
+    poly(c, [x - R * 0.7, neck - bob, x + R * 0.5, neck - bob, x - f * (R * 1.6) + Math.sin(a.t * 3 + a.u.uid) * 2, gy - h * 0.08, x - f * R * 0.4, gy - h * 0.12], capeCol, 1.8);
+  }
   o.back?.(x - f * R * 0.2, neck + 6 - bob);
   // legs
   if (!o.noLegs) {
@@ -101,6 +122,16 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   else { c.moveTo(x - bw * 0.75, neck - bob); c.lineTo(x + bw * 0.75, neck - bob); c.lineTo(x + bw * 0.95, hip + 4 - bob); c.lineTo(x - bw * 0.95, hip + 4 - bob); }
   c.closePath(); fillStroke(c, vgrad(c, o.cloth, neck - bob, o.robe ? gy : hip));
   c.fillStyle = o.trim; c.fillRect(x - bw * 0.95, hip - 4 - bob, bw * 1.9, 5); // belt
+  if (tier >= 1) {
+    const m = METAL[tier];
+    if (tier === 1) { c.save(); c.strokeStyle = m; c.lineWidth = Math.max(2, h * 0.05); c.beginPath(); c.moveTo(x - bw * 0.7, neck + 2 - bob); c.lineTo(x + bw * 0.8, hip - 4 - bob); c.stroke(); c.restore(); }
+    else { // breastplate
+      c.beginPath(); c.moveTo(x - bw * 0.72, neck + 2 - bob); c.lineTo(x + bw * 0.72, neck + 2 - bob); c.lineTo(x + bw * 0.62, hip - 6 - bob); c.quadraticCurveTo(x, hip - bob, x - bw * 0.62, hip - 6 - bob); c.closePath();
+      fillStroke(c, vgrad(c, m, neck - bob, hip - bob), 1.6);
+      c.strokeStyle = shade(m, -0.35); c.lineWidth = 1; c.beginPath(); c.moveTo(x, neck + 4 - bob); c.lineTo(x, hip - 6 - bob); c.stroke(); c.strokeStyle = OUT;
+    }
+    c.fillStyle = tier >= 3 ? '#ffcf3d' : m; c.fillRect(x - 3, hip - 5 - bob, 6, 6); // buckle
+  }
   // head
   circle(c, x, headY - bob, R, o.skin);
   if (o.mask) { c.save(); c.beginPath(); c.arc(x, headY - bob, R - 1.2, 0.15, Math.PI - 0.15); c.closePath(); c.fillStyle = o.mask; c.fill(); c.restore(); }
@@ -108,6 +139,13 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   if (!o.glowEyes && !o.mask) { c.fillStyle = 'rgba(230,110,90,.28)'; c.beginPath(); c.arc(x + f * R * 0.62, headY - bob + R * 0.3, R * 0.16, 0, 7); c.fill(); }
   if (!o.mask && !o.glowEyes) { c.strokeStyle = OUT; c.lineWidth = 2; c.beginPath(); c.arc(x + f * R * 0.38, headY - bob + R * 0.42, R * 0.18, o.angry ? Math.PI + 0.4 : 0.3, o.angry ? -0.4 : Math.PI - 0.3); c.stroke(); }
   o.head?.(x, headY - bob, R);
+  if (tier >= 1 && !o.noLegs) {
+    for (const sx of [x - f * R * 0.55, x + f * R * 0.55]) ellipse(c, sx, neck + 4 - bob, R * 0.42, R * 0.26, METAL[tier], 0, 1.6);
+  }
+  if (tier >= 3) { // plume
+    c.save(); c.strokeStyle = tier >= 4 ? '#ff4d4d' : a.side ? '#3a3a44' : '#c0392b'; c.lineWidth = R * 0.32; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(x, headY - bob - R * 0.95); c.quadraticCurveTo(x - f * R * 0.9, headY - bob - R * 1.9, x - f * R * 1.7, headY - bob - R * 1.1); c.stroke(); c.restore();
+  }
   // front arm + weapon
   const ang = o.armAng ?? (f > 0 ? lerp(-1.25, 0.55, a.atk) : Math.PI - lerp(-1.25, 0.55, a.atk));
   const sx = x + f * R * 0.35, sy = neck + 6 - bob;
@@ -115,6 +153,7 @@ function human(a: ArtCtx, h: number, o: HumanOpts) {
   const hx = sx + Math.cos(ang) * al, hy = sy + Math.sin(ang) * al;
   line(c, sx, sy, hx, hy, o.skin, Math.max(3, h * 0.065));
   o.weapon?.(hx, hy, ang);
+  if (tier >= 3 && o.weapon) glowDot(c, hx + Math.cos(ang - f * 1.1) * h * 0.3, hy + Math.sin(ang - f * 1.1) * h * 0.3, 2.5 + Math.sin(a.t * 6) * 0.8, '#fff3b0');
   circle(c, hx, hy, Math.max(2.5, h * 0.045), o.skin, 2);
 }
 
@@ -192,10 +231,9 @@ function rocks(c: C, x: number, gy: number, s: number, f: number, swing: number,
   r(f * -24, -50, 12, 26);
   r(0, -68, 22, 18);
   r(f * (24 + atk * 12), -50 - atk * 8, 13, 28);
-  c.fillStyle = runes ?? '#ffb347'; c.shadowColor = runes ?? '#ffb347'; c.shadowBlur = 8;
+  c.fillStyle = runes ?? '#ffb347';
   c.fillRect(x + f * 2 * s - 2 * s, gy - 62 * s, 4 * s, 4 * s); c.fillRect(x + f * 8 * s - 2 * s, gy - 62 * s, 4 * s, 4 * s);
   if (runes) { c.fillRect(x - 6 * s, gy - 42 * s, 12 * s, 3 * s); c.fillRect(x - 1.5 * s, gy - 48 * s, 3 * s, 14 * s); }
-  c.shadowBlur = 0;
   if (crown) crownAt(c, x, gy - 68 * s, 11 * s);
 }
 
@@ -205,6 +243,20 @@ function crownAt(c: C, x: number, y: number, w: number) {
 
 // ---------------- Unit table ----------------
 export function drawArt(a: ArtCtx) {
+  const tier = a.tier ?? a.u.tier ?? 0;
+  a.tier = tier;
+  if (tier >= 4 && !LOW) { // legendary aura at the feet
+    const c = a.c; const r = Math.min(60, a.u.def.height * 0.55);
+    c.save(); c.globalAlpha *= 0.35 + Math.sin(a.t * 4) * 0.1; c.strokeStyle = '#ffe27a'; c.lineWidth = 3; c.beginPath(); c.ellipse(a.x, a.gy + 2, r, r * 0.22, 0, 0, 7); c.stroke(); c.restore();
+  }
+  drawArtInner(a);
+  if (tier >= 3 && !LOW) { // sparkles
+    const c = a.c;
+    for (let i = 0; i < (tier >= 4 ? 3 : 1); i++) { const ph = a.t * 2 + i * 2.1 + a.u.uid; const sx = a.x + Math.sin(ph * 1.3) * a.u.def.height * 0.35, sy = a.gy - a.u.def.height * (0.3 + ((ph * 0.5) % 1) * 0.7); c.fillStyle = '#fff6c0'; c.globalAlpha *= 0.8; c.beginPath(); c.moveTo(sx, sy - 4); c.lineTo(sx + 1.2, sy - 1.2); c.lineTo(sx + 4, sy); c.lineTo(sx + 1.2, sy + 1.2); c.lineTo(sx, sy + 4); c.lineTo(sx - 1.2, sy + 1.2); c.lineTo(sx - 4, sy); c.lineTo(sx - 1.2, sy - 1.2); c.fill(); c.globalAlpha /= 0.8; }
+  }
+}
+
+function drawArtInner(a: ArtCtx) {
   const { c, u, x, gy, f, side, t } = a;
   const id = u.def.id;
   const h = u.def.height;
@@ -264,7 +316,7 @@ export function drawArt(a: ArtCtx) {
         armAng: f > 0 ? -1.1 : Math.PI + 1.1,
         weapon: (hx, hy) => {
           line(c, hx, hy - 10, hx, hy + h * 0.55, '#8b5a2b', 3);
-          c.save(); c.fillStyle = '#7dff9a'; c.shadowColor = '#7dff9a'; c.shadowBlur = 10 + a.atk * 14; c.beginPath(); c.arc(hx, hy - 14, 5 + a.atk * 3, 0, 7); c.fill(); c.restore();
+          glowDot(c, hx, hy - 14, 5 + a.atk * 3, '#7dff9a');
         },
       });
     case 'fire':
@@ -316,7 +368,7 @@ export function drawArt(a: ArtCtx) {
         armAng: f > 0 ? -1.0 + a.atk * 0.6 : Math.PI + 1.0 - a.atk * 0.6,
         weapon: (hx, hy) => {
           line(c, hx, hy - 6, hx, hy + h * 0.5, '#6b4423', 3);
-          c.save(); c.fillStyle = '#c77dff'; c.shadowColor = '#c77dff'; c.shadowBlur = 10 + a.atk * 12; c.beginPath(); c.arc(hx, hy - 10, 5 + a.atk * 3, 0, 7); c.fill(); c.restore();
+          glowDot(c, hx, hy - 10, 5 + a.atk * 3, '#c77dff');
         },
       });
     case 'ghost':
@@ -346,7 +398,7 @@ export function drawArt(a: ArtCtx) {
         skin: '#4fd1a0', cloth: '#ffd34d', trim: '#b5791f', noLegs: true,
         head: (hx, hy, r) => { turban(c, '#f2f2f2')(hx, hy, r); circle(c, hx, hy - r * 0.9, r * 0.2, '#e0453a', 2); },
         armAng: f > 0 ? -0.6 - a.atk * 0.5 : Math.PI + 0.6 + a.atk * 0.5,
-        weapon: (hx, hy) => { c.save(); c.fillStyle = '#c3fff0'; c.shadowColor = '#4fd1a0'; c.shadowBlur = 16; c.beginPath(); c.arc(hx, hy, 6 + a.atk * 4, 0, 7); c.fill(); c.restore(); },
+        weapon: (hx, hy) => glowDot(c, hx, hy, 6 + a.atk * 4, '#4fd1a0', '#c3fff0'),
       });
     case 'djinn':
       smokeTail(c, x, gy - h * 0.4, gy + 10, f, '#6a3fa0', t);
@@ -354,7 +406,7 @@ export function drawArt(a: ArtCtx) {
         skin: '#8a5cc7', cloth: '#2a1b4a', trim: '#ffd34d', noLegs: true, glowEyes: '#ffef5c',
         head: (hx, hy, r) => { poly(c, [hx - r * 0.7, hy - r * 0.6, hx - r * 1.1, hy - r * 1.6, hx - r * 0.3, hy - r * 0.9], '#ffd34d', 2); poly(c, [hx + r * 0.7, hy - r * 0.6, hx + r * 1.1, hy - r * 1.6, hx + r * 0.3, hy - r * 0.9], '#ffd34d', 2); crownAt(c, hx, hy - r * 0.85, r * 0.55); },
         armAng: f > 0 ? -0.6 - a.atk * 0.5 : Math.PI + 0.6 + a.atk * 0.5,
-        weapon: (hx, hy) => { c.save(); c.fillStyle = '#d8b4ff'; c.shadowColor = '#c77dff'; c.shadowBlur = 18; c.beginPath(); c.arc(hx, hy, 7 + a.atk * 5, 0, 7); c.fill(); c.restore(); },
+        weapon: (hx, hy) => glowDot(c, hx, hy, 7 + a.atk * 5, '#c77dff', '#f0dcff'),
       });
     case 'scorpking':
       return scorpion(a, h / 100, true);
