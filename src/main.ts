@@ -714,7 +714,20 @@ let battle: Battle | null = null;
 let raf = 0;
 let lastT = 0;
 let hudRefs: { gold: HTMLElement; time: HTMLElement; btns: Record<string, HTMLElement>; ability: HTMLElement; mini: HTMLElement; minic: HTMLCanvasElement; tower: HTMLElement; mine: HTMLElement; hide: HTMLElement; hint: HTMLElement | null; ctrl: HTMLElement; pads: HTMLElement[]; modes: Record<string, HTMLElement> } | null = null;
-let camHold = 0; // -1 / 1 while a camera arrow is held
+let camHold = 0;
+let unitPage = 0;
+let unitUpHandler: ((e: PointerEvent) => void) | null = null;
+let unitPages: { perPage: number; pages: number; order: EnemyId[]; show: (p: number) => void } | null = null;
+function unitInfo(btn: HTMLElement, id: EnemyId) {
+  const b = battle; if (!b) return;
+  const d = UNITS[id];
+  const tags = [d.flying && '🪽', d.ranged && '🏹', d.heal && '✚', d.splash && '💥', d.hero && '⭐', d.premium && '👑'].filter(Boolean).join(' ');
+  const r = btn.getBoundingClientRect();
+  const tip = h(`<div class="unit-tip"><b>${tk('u_' + id)}</b> ${tags}<div>❤️ ${num(d.hp)} · ${d.heal ? '✚ ' + num(d.heal) : '⚔️ ' + num(d.dmg)} · 🪙 ${num(b.costOf(id))} · ⏱ ${num(b.trainTime(id))}s</div>${tk('ud_' + id) !== 'ud_' + id ? `<small>${tk('ud_' + id)}</small>` : ''}</div>`);
+  document.getElementById('app')!.appendChild(tip);
+  tip.style.left = `${Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, r.left + r.width / 2 - tip.offsetWidth / 2))}px`;
+  tip.style.top = `${r.top - tip.offsetHeight - 10}px`;
+} // -1 / 1 while a camera arrow is held
 let tutorialStep = 0;
 
 function stopBattleLoop() { cancelAnimationFrame(raf); battle = null; }
@@ -824,8 +837,13 @@ function buildHud() {
       <button class="btn secondary small" data-a="pause" aria-label="pause">II</button>
     </div>
     <div class="hud-bottom">
-      <div class="units">${unlockedUnits.map((id) => `<button class="ubtn ${UNITS[id].hero ? 'hero' : ''}" data-u="${id}" aria-label="${tk('u_' + id)}">
-        <span class="qn" style="display:none"></span><img src="${unitIcon(id)}" alt=""><span class="cost">${num(b.costOf(id))}</span><span class="prog"></span></button>`).join('')}</div>
+      <div class="unit-pager">
+        <button class="pg" data-pg="-1" aria-label="previous">‹</button>
+        <div class="units">${unlockedUnits.map((id) => `<button class="ubtn ${UNITS[id].hero ? 'hero' : ''}" data-u="${id}" aria-label="${tk('u_' + id)}">
+          <span class="qn" style="display:none"></span><img src="${unitIcon(id)}" alt=""><span class="cost">${num(b.costOf(id))}</span><span class="prog"></span></button>`).join('')}</div>
+        <button class="pg" data-pg="1" aria-label="next">›</button>
+        <div class="pg-dots"></div>
+      </div>
       <div class="grow"></div>
       <button class="tbtn" data-a="hide" title="${t('hideMiners')}">🏠<b data-r="hidelbl">${t('hide')}</b></button>
       <button class="tbtn" data-a="mine" title="${t('mineUp')}">⛏️<b data-r="mlvl">1/3</b><small data-r="mcost"></small></button>
@@ -855,10 +873,46 @@ function buildHud() {
   });
 
   const btns: Record<string, HTMLElement> = {};
-  el.querySelectorAll<HTMLElement>('[data-u]').forEach((btn) => {
+  // ---- paged unit bar: groups that fit the screen, switched with arrows, dots or a swipe ----
+  const order = Array.from(el.querySelectorAll<HTMLElement>('[data-u]'));
+  const btnW = innerHeight <= 430 ? 68 : 80;
+  const sideW = 4 * 70 + 160; // tower/mine/hide/ctrl buttons + modes + ability
+  const perPage = Math.max(3, Math.min(9, Math.floor((innerWidth - sideW - 70) / btnW)));
+  const pages = Math.max(1, Math.ceil(order.length / perPage));
+  const dots = $(el, '.pg-dots');
+  dots.innerHTML = pages > 1 ? Array.from({ length: pages }, (_, i) => `<i data-dot="${i}"></i>`).join('') : '';
+  const showPage = (p: number) => {
+    unitPage = (p + pages) % pages;
+    order.forEach((bt, i) => (bt.style.display = Math.floor(i / perPage) === unitPage ? '' : 'none'));
+    dots.querySelectorAll('i').forEach((d, i) => d.classList.toggle('on', i === unitPage));
+  };
+  el.querySelectorAll<HTMLElement>('[data-pg]').forEach((pb) => { pb.style.display = pages > 1 ? '' : 'none'; pb.addEventListener('pointerdown', (e) => { e.preventDefault(); sfx('click'); showPage(unitPage + Number(pb.dataset.pg)); }); });
+  dots.querySelectorAll<HTMLElement>('[data-dot]').forEach((d) => d.addEventListener('pointerdown', (e) => { e.preventDefault(); showPage(Number(d.dataset.dot)); }));
+  unitPages = { perPage, pages, order: order.map((o) => o.dataset.u as EnemyId), show: showPage };
+  showPage(Math.min(unitPage, pages - 1));
+  // tap = train, swipe = change page, long-press = unit info
+  let press: { x: number; t: number; id: string; timer: number; info: boolean } | null = null;
+  const unitsEl = $(el, '.units');
+  order.forEach((btn) => {
     btns[btn.dataset.u!] = btn;
-    btn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); battle?.train(btn.dataset.u as EnemyId); });
+    btn.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.preventDefault(); unlockAudio();
+      const id = btn.dataset.u!;
+      press = { x: e.clientX, t: performance.now(), id, info: false, timer: window.setTimeout(() => { if (press) { press.info = true; unitInfo(btn, id as EnemyId); } }, 450) };
+    });
   });
+  if (unitUpHandler) removeEventListener('pointerup', unitUpHandler);
+  unitUpHandler = (e: PointerEvent) => {
+    if (!press) return;
+    clearTimeout(press.timer);
+    const dx = e.clientX - press.x;
+    document.querySelector('.unit-tip')?.remove();
+    if (Math.abs(dx) > 40 && pages > 1) showPage(unitPage + (dx < 0 ? 1 : -1));
+    else if (!press.info) battle?.train(press.id as EnemyId);
+    press = null;
+  };
+  addEventListener('pointerup', unitUpHandler);
+  unitsEl.addEventListener('pointerleave', () => { if (press) { clearTimeout(press.timer); } });
   const modes: Record<string, HTMLElement> = {};
   el.querySelectorAll<HTMLElement>('[data-m]').forEach((btn) => {
     modes[btn.dataset.m!] = btn;
@@ -934,8 +988,8 @@ addEventListener('pointerup', (e) => {
 // Keyboard support (desktop testing).
 addEventListener('keydown', (e) => {
   if (!battle) return;
-  const map: Record<string, UnitId> = { '1': 'miner', '2': 'sword', '3': 'archer', '4': 'spear', '5': 'camel', '6': 'catapult' };
-  if (map[e.key]) battle.train(map[e.key]);
+  if (unitPages && /^[1-9]$/.test(e.key)) { const id = unitPages.order[unitPage * unitPages.perPage + Number(e.key) - 1]; if (id) battle.train(id); }
+  if (e.key === 'Tab' && unitPages) { e.preventDefault(); unitPages.show(unitPage + (e.shiftKey ? -1 : 1)); }
   if (e.key === 'a' || e.key === 'ArrowLeft') battle.ctrlDir = -1;
   if (e.key === 'd' || e.key === 'ArrowRight') battle.ctrlDir = 1;
   if (e.key === ' ') battle.ctrlAttack = true;
@@ -957,6 +1011,12 @@ function updateHud() {
   if (cd && b.level.winAfter) cd.textContent = num(Math.max(0, Math.ceil(b.level.winAfter - b.time)));
   const wv = document.querySelector('[data-r="wave"]');
   if (wv) wv.textContent = num(b.survivalWave);
+  // page dots glow when a unit on that page is ready to train
+  if (unitPages && unitPages.pages > 1) {
+    const ready = new Array(unitPages.pages).fill(false);
+    unitPages.order.forEach((id, i) => { if (b.canTrain(id)) ready[Math.floor(i / unitPages!.perPage)] = true; });
+    document.querySelectorAll<HTMLElement>('.pg-dots i').forEach((d, i) => d.classList.toggle('ready', ready[i]));
+  }
   // live army counter (fighters only)
   let myn = 0, en = 0;
   for (const u of b.units) if (!u.dead && !u.def.miner) { if (u.side === 0) myn++; else en++; }
