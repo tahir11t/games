@@ -43,7 +43,7 @@ export function play(levelIdx: number, upg: number, skill: number, level?: Level
 export const expectedUpgrade = (i: number) => Math.min(18, 1 + Math.floor((i - 1) / 2.6));
 if (process.argv[1]?.endsWith('balance.ts')) {
 const rows: string[] = [];
-const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 50);
+const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 70);
 for (let i = FROM; i <= TO; i++) {
   const upg = Math.min(20, expectedUpgrade(i) + Number(process.env.UPG_BONUS ?? 0));
   let wins = 0, t = 0, st = 0;

@@ -9,7 +9,9 @@ import { Battle, W } from './game/battle';
 import { Renderer } from './game/render';
 import { sfx, setSound, setMusicOn, startMusic, stopMusic, unlockAudio, playTrack, setRotation, TRACKS } from './game/audio';
 import { FACTIONS, CONQUEST_BATTLES, HERO_BATTLE, SIEGE_BATTLE, ELITE_BATTLE, conquestLevel, factionById, conquered, rosterOf, type FactionDef, type ArmyId } from './data/factions';
-import type { EnemyId } from './data/units';
+import { PREMIUM_UNITS, type EnemyId } from './data/units';
+import { PRODUCTS, SUB_PLANS, TEST_MODE, type Product } from './store';
+import { TOWER_FLOORS, towerLevel, towerRule } from './data/challenges';
 import { DIFFICULTY, tierOf, MAX_TOWER_ARCHERS, type Difficulty } from './game/battle';
 import { setLowQuality } from './game/art';
 import { LEVEL_COUNT } from './data/levels';
@@ -53,7 +55,7 @@ function armyFor(L?: LevelDef): ArmyId {
   if (L?.kind === 'challenge' || a === 'desert') return 'desert';
   return conquered(save.conquest[a] ?? 0) ? a : 'desert';
 }
-function perks(L?: LevelDef): Perks & { difficulty: Difficulty; army: ArmyId } { return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives, difficulty: save.difficulty, army: armyFor(L) }; }
+function perks(L?: LevelDef): Perks & { difficulty: Difficulty; army: ArmyId; extra: EnemyId[] } { return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives, difficulty: save.difficulty, army: armyFor(L), extra: PREMIUM_UNITS.filter((u) => save.owned.includes(u)) }; }
 /** Portrait of any unit in the current look (civilization units borrow their role's upgrade tier). */
 function unitIcon(id: EnemyId) {
   if (id in save.unitLevels && !FACTIONS.some((f) => f.roles[id])) return iconFor(id as UnitId);
@@ -380,7 +382,7 @@ function showSettings() {
         <div class="row"><b class="grow">🎥 ${t('camera')}</b>${(['both', 'arrows', 'touch'] as const).map((m) => `<button class="btn small ${save.camMode === m ? '' : 'secondary'}" data-cam="${m}">${t(m === 'both' ? 'camBoth' : m === 'arrows' ? 'camArrows' : 'camTouch')}</button>`).join('')}</div>
         <div class="row"><b class="grow">🖼️ ${t('quality')}</b>${(['auto', 'high', 'low'] as const).map((q) => `<button class="btn small ${save.quality === q ? '' : 'secondary'}" data-q="${q}">${t(('q_' + q) as Key)}</button>`).join('')}</div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v0.7.0</div>
+        <div style="font-size:12px;color:var(--muted)">v0.8.0</div>
       </div>
     </div>
   </div>`);
@@ -419,6 +421,7 @@ function showModes() {
       ${card('campaign', '🗺️', t('campaign'), t('campaignDesc'), `⭐ ${num(totalStars())}/${num(LEVEL_COUNT * 3)}`, '')}
       ${card('challenges', '🐲', t('challenges'), t('challengesDesc'), `🏆 ${num(trophies)}/${num(CHALLENGES.length)}`, save.unlocked > 6 || save.stars[6] ? '' : `🔒 ${t('needLevel')} ${num(6)}`)}
       ${card('conquest', '⚔️', t('conquest'), t('conquestDesc'), `🏆 ${num(FACTIONS.filter((f) => (save.conquest[f.id] ?? 0) >= CONQUEST_BATTLES).length)}/${num(FACTIONS.length)}`, save.unlocked > 6 || save.stars[6] ? '' : `🔒 ${t('needLevel')} ${num(6)}`)}
+      ${card('tower', '🗼', t('tower'), t('towerShort'), `🏆 ${num(save.tower)}/${num(TOWER_FLOORS)}`, save.unlocked > 8 || save.stars[8] ? '' : `🔒 ${t('needLevel')} ${num(8)}`)}
       ${card('survival', '♾️', t('survival'), t('survivalDesc'), `${t('best')}: ${num(save.survivalBest)} ${t('waves')}`, survOpen ? '' : `🔒 ${t('needLevel')} ${num(5)}`)}
       ${card('daily', daily.mod.icon, t('dailyCh'), tk(daily.mod.id), save.dailyDone === today ? t('doneToday') : '💎 25 · 🪙 300', dailyOpen ? '' : `🔒 ${t('needLevel')} ${num(3)}`)}
     </div>
@@ -429,6 +432,7 @@ function showModes() {
     if (go === 'campaign') showCampaign();
     if (go === 'challenges') showChallenges();
     if (go === 'conquest') showConquest();
+    if (go === 'tower') showTower();
     if (go === 'survival') startLevel(survivalLevel(), 0);
     if (go === 'daily') startLevel(daily.level, 0);
   }));
@@ -521,9 +525,10 @@ function showChallenges() {
 }
 
 // ---------------- Shop: units, commander skills, passive boosts ----------------
-type ShopTab = 'units' | 'skills' | 'passives';
+type ShopTab = 'units' | 'skills' | 'passives' | 'premium';
 function showShop(tab: ShopTab) {
-  const tabs = (['units', 'skills', 'passives'] as ShopTab[]).map((k) => `<button class="tab ${k === tab ? 'on' : ''}" data-tab="${k}">${t(k === 'passives' ? 'passivesT' : k)}</button>`).join('');
+  if (tab === 'premium') return showPremium();
+  const tabs = (['premium', 'units', 'skills', 'passives'] as ShopTab[]).map((k) => `<button class="tab ${k === tab ? 'on' : ''} ${k === 'premium' ? 'prem' : ''}" data-tab="${k}">${k === 'premium' ? '👑 ' + t('premium') : t(k === 'passives' ? 'passivesT' : k)}</button>`).join('');
   let items = '';
   if (tab === 'units') {
     items = (Object.keys(UNIT_SHOP) as UnitId[]).map((id) => {
@@ -582,6 +587,89 @@ function showShop(tab: ShopTab) {
     save.gold -= cost; save.passives[id]++; bought(id, { gold: cost });
   }));
   mount(el);
+}
+
+// ---------------- Premium store (real money, test mode) ----------------
+function checkout(p: Product): Promise<boolean> {
+  return new Promise((resolve) => {
+    const el = h(`<div class="screen dim" style="z-index:70"><div class="panel col" style="align-items:center;text-align:center;min-width:300px">
+      <div style="font-size:12px;color:#ffb38a">${TEST_MODE ? '🧪 ' + t('testPurchase') : ''}</div>
+      <h3>${p.kind === 'hero' ? tk('u_' + p.unit) : p.kind === 'sub' ? tk('sub_' + p.plan) : '💎 ' + num(p.gems!)}</h3>
+      <div style="font-size:30px;font-weight:900;color:var(--gold2)">${p.price}</div>
+      <div class="row"><button class="btn secondary" data-a="no">${t('back')}</button><button class="btn" data-a="yes">${t('buy')}</button></div></div></div>`);
+    document.getElementById('app')!.appendChild(el);
+    el.querySelector('[data-a="no"]')!.addEventListener('click', () => { el.remove(); resolve(false); });
+    el.querySelector('[data-a="yes"]')!.addEventListener('click', () => { el.remove(); track('iap_purchase', { product: p.id, usd: p.usd, test: TEST_MODE }); resolve(true); });
+  });
+}
+function grantLegend(u: UnitId) {
+  if (!save.owned.includes(u)) save.owned.push(u);
+  toast(`<span class="toast-ico">👑</span><div><b>${t('newLegend')}</b><div>${tk('u_' + u)}</div></div>`);
+  sfx('rank');
+}
+function subActive() { return !!save.sub.plan && Date.now() < save.sub.until; }
+function claimSubDaily() {
+  if (!subActive() || save.sub.lastClaim === todayStr()) return false;
+  const plan = SUB_PLANS[save.sub.plan!];
+  save.gold += plan.gold; save.gems += plan.gems;
+  save.sub.lastClaim = todayStr(); save.sub.days++;
+  if (save.sub.days % plan.heroAfter === 0) { // a legend for loyal subscribers
+    const pool = PREMIUM_UNITS.filter((u) => !save.owned.includes(u));
+    if (pool.length) grantLegend(pool[Math.floor(Math.random() * pool.length)]);
+  }
+  persist(); sfx('coin');
+  return true;
+}
+function showPremium() {
+  const tabs = (['premium', 'units', 'skills', 'passives'] as ShopTab[]).map((k) => `<button class="tab ${k === 'premium' ? 'on prem' : ''}" data-tab="${k}">${k === 'premium' ? '👑 ' + t('premium') : t(k === 'passives' ? 'passivesT' : k)}</button>`).join('');
+  const heroes = PRODUCTS.filter((p) => p.kind === 'hero').map((p) => {
+    const u = p.unit!, d = UNITS[u], own = save.owned.includes(u);
+    return `<div class="legend-card ${own ? 'owned' : ''}"><img src="${iconFor(u)}" alt=""><div class="meta"><b>👑 ${tk('u_' + u)}</b><small>${tk('ud_' + u)}</small>
+      <small>❤️ ${num(d.hp)} · ⚔️ ${num(d.dmg)}${d.flying ? ' · 🪽' : ''}</small></div>
+      ${own ? `<span class="chip">✓ ${t('owned')}</span>` : `<button class="btn small" data-buy="${p.id}">${p.price}</button>`}</div>`;
+  }).join('');
+  const subs = (['weekly', 'monthly'] as const).map((plan) => {
+    const p = PRODUCTS.find((x) => x.plan === plan)!, P = SUB_PLANS[plan], active = subActive() && save.sub.plan === plan;
+    return `<div class="sub-card ${plan} ${active ? 'on' : ''}"><b>${tk('sub_' + plan)}</b><div class="sub-perks">🪙 ${num(P.gold)} + 💎 ${num(P.gems)} ${t('perDay')}<br>👑 ${t('legendEvery')} ${num(P.heroAfter)} ${t('daysWord')}</div>
+      ${active ? `<div class="chip">⏳ ${num(Math.ceil((save.sub.until - Date.now()) / 86400000))} ${t('daysWord')}</div><button class="btn small ${save.sub.lastClaim === todayStr() ? 'secondary' : ''}" data-claim ${save.sub.lastClaim === todayStr() ? 'disabled' : ''}>${save.sub.lastClaim === todayStr() ? t('claimed') : t('claim')}</button>` : `<button class="btn small" data-buy="${p.id}">${p.price}</button>`}</div>`;
+  }).join('');
+  const gems = PRODUCTS.filter((p) => p.kind === 'gems').map((p) => `<button class="gem-pack" data-buy="${p.id}"><span>💎</span><b>${num(p.gems!)}</b><small>${p.price}</small></button>`).join('');
+  const el = h(`<div class="screen">${topbar()}<div class="tabs" style="margin-top:10px">${tabs}</div>
+    <div class="premium">
+      <div class="prem-sec"><h3>👑 ${t('legends')}</h3><div class="legend-grid">${heroes}</div></div>
+      <div class="prem-sec"><h3>📅 ${t('subscriptions')}</h3><div class="sub-grid">${subs}</div><h3>💎 ${t('gems')}</h3><div class="gem-row">${gems}</div>
+      ${TEST_MODE ? `<div class="test-note">🧪 ${t('testNote')}</div>` : ''}</div>
+    </div></div>`);
+  el.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => { sfx('click'); showShop(b.dataset.tab as ShopTab); }));
+  el.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', async () => {
+    const p = PRODUCTS.find((x) => x.id === b.dataset.buy)!;
+    if (!(await checkout(p))) return;
+    save.purchases.push(p.id);
+    if (p.kind === 'hero') grantLegend(p.unit!);
+    else if (p.kind === 'gems') { save.gems += p.gems!; sfx('coin'); }
+    else { save.sub = { plan: p.plan!, until: Math.max(Date.now(), save.sub.until) + SUB_PLANS[p.plan!].days * 86400000, lastClaim: null, days: save.sub.plan === p.plan ? save.sub.days : 0 }; claimSubDaily(); }
+    persist(); showPremium();
+  }));
+  el.querySelector('[data-claim]')?.addEventListener('click', () => { claimSubDaily(); showPremium(); });
+  mount(el);
+}
+
+// ---------------- Trials Tower ----------------
+function showTower() {
+  const next = Math.min(TOWER_FLOORS, save.tower + 1);
+  const floors = Array.from({ length: TOWER_FLOORS }, (_, i) => TOWER_FLOORS - i);
+  const el = h(`<div class="screen">${topbar()}
+    <div class="tower-wrap"><div class="tower">${floors.map((n) => {
+      const r = towerRule(n), done = n <= save.tower, cur = n === next && save.tower < TOWER_FLOORS;
+      return `<button class="floor ${done ? 'done' : ''} ${cur ? 'current' : ''} ${n % 5 === 0 ? 'guard' : ''}" data-fl="${n}" ${n > next ? 'disabled' : ''}>
+        <b>${num(n)}</b><span>${n % 5 === 0 ? '👹' : r.icon}</span><small>${tk(r.id)}</small>${done ? '<i>✓</i>' : ''}</button>`;
+    }).join('')}</div>
+    <div class="tower-side panel col"><h3>🗼 ${t('tower')}</h3><div>${t('towerDesc')}</div><div class="chip">🏆 ${num(save.tower)}/${num(TOWER_FLOORS)}</div>
+      ${save.tower < TOWER_FLOORS ? `<button class="btn" data-fl="${next}">⚔️ ${t('floor')} ${num(next)}</button>` : ''}${diffPicker()}</div></div></div>`);
+  el.querySelectorAll<HTMLElement>('[data-fl]').forEach((b) => b.addEventListener('click', () => { sfx('click'); startLevel(towerLevel(Number(b.dataset.fl)), 0); }));
+  bindDiff(el, showTower);
+  mount(el);
+  requestAnimationFrame(() => el.querySelector('.floor.current')?.scrollIntoView({ block: 'center' }));
 }
 
 // ---------------- Pre-battle ----------------
@@ -656,8 +744,9 @@ function startLevel(L: LevelDef, bonusGold: number) {
   tutorialStep = index === 1 && !save.tutorialDone ? 1 : 0;
   if (tutorialStep) track('tutorial_step', { step: 1 });
   buildHud();
+  const towerBanner = L.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(L.id))} · ${towerRule(Number(L.id)).icon} ${tk(towerRule(Number(L.id)).id)}` : '';
   const fac = L.kind === 'conquest' ? factionById(L.id!.split('-')[0]) : null;
-  const banner = fac ? `${fac.icon} ${tk('f_' + fac.id)} · ${t('battle')} ${num(Number(L.id!.split('-')[1]))}` : L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '';
+  const banner = towerBanner || (fac ? `${fac.icon} ${tk('f_' + fac.id)} · ${t('battle')} ${num(Number(L.id!.split('-')[1]))}` : L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '');
   if (banner) ui.appendChild(h(`<div class="boss-banner">${banner}</div>`));
   lastT = performance.now();
   raf = requestAnimationFrame(loop);
@@ -717,7 +806,7 @@ function placeHint() {
 
 function buildHud() {
   const b = battle!;
-  const kindLabel = b.level.kind === 'conquest' ? `${factionById(b.level.id!.split('-')[0]).icon} ${t('battle')} ${num(Number(b.level.id!.split('-')[1]))}` : b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
+  const kindLabel = b.level.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(b.level.id))}` : b.level.kind === 'conquest' ? `${factionById(b.level.id!.split('-')[0]).icon} ${t('battle')} ${num(Number(b.level.id!.split('-')[1]))}` : b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
   const desert = b.roster === PLAYER_UNITS;
   const unlockedUnits: EnemyId[] = desert
     ? PLAYER_UNITS.filter((id) => (b.level.kind === 'campaign' || !b.level.kind ? (isBase(id) ? UNITS[id].unlock <= Math.max(b.level.index, save.unlocked) : unitAvailable(id)) : unitAvailable(id)) && b.isAllowed(id))
@@ -731,6 +820,7 @@ function buildHud() {
       <span class="chip army-count" title="army">🛡️ <b data-r="myn">0</b> <i>⚔</i> <b data-r="en">0</b> 💀</span>
       <span class="chip">${kindLabel}</span>
       <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">▶${save.speed === 2 ? '▶' : ''} ×${save.speed}</button>
+      <button class="btn secondary small" data-a="gear" aria-label="settings">⚙️</button>
       <button class="btn secondary small" data-a="pause" aria-label="pause">II</button>
     </div>
     <div class="hud-bottom">
@@ -785,6 +875,7 @@ function buildHud() {
   const ctrl = $(el, '[data-a="ctrl"]');
   ctrl.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.takeControl(); renderer.follow = true; });
   $(el, '[data-a="pause"]').addEventListener('click', () => pauseMenu());
+  $(el, '[data-a="gear"]').addEventListener('click', () => pauseMenu());
   const spd = $(el, '[data-a="speed"]');
   spd.addEventListener('click', () => { save.speed = save.speed === 1 ? 2 : 1; persist(); spd.textContent = `▶${save.speed === 2 ? '▶' : ''} ×${save.speed}`; sfx('click'); });
 
@@ -934,11 +1025,20 @@ function pauseMenu() {
   if (!battle) return;
   battle.paused = true;
   const el = h(`<div class="screen dim" style="z-index:20"><div class="panel col" style="min-width:260px;align-items:stretch">
-    <h2 style="text-align:center">${t('pause')}</h2>
+    <h2 style="text-align:center">⚙️ ${t('pause')}</h2>
+    <div class="row"><b class="grow">🎵 ${t('music')}</b><button class="btn small ${save.musicOn ? '' : 'secondary'}" data-a="pmusic">${save.musicOn ? t('on') : t('off')}</button>
+      <b>🔊</b><button class="btn small ${save.sound ? '' : 'secondary'}" data-a="psfx">${save.sound ? t('on') : t('off')}</button></div>
+    <div class="tracks">${['auto', ...TRACKS.map((x) => x.id)].map((id) => `<button class="track ${save.music === id ? 'on' : ''}" data-ptrack="${id}">${id === 'auto' ? '✨ ' + t('auto') : '🎶 ' + tk('t_' + id)}</button>`).join('')}</div>
+    <div class="row"><b class="grow">❤️ ${t('hpNumbers')}</b><button class="btn small ${save.showHp ? '' : 'secondary'}" data-a="php">${save.showHp ? t('on') : t('off')}</button></div>
     <button class="btn" data-a="resume">${t('resume')}</button>
     <button class="btn secondary" data-a="quit">${t('quit')}</button></div></div>`);
   ui.appendChild(el);
   el.querySelector('[data-a="resume"]')!.addEventListener('click', () => { el.remove(); if (battle) { battle.paused = false; lastT = performance.now(); } });
+  const redraw = () => { el.remove(); pauseMenu(); };
+  el.querySelector('[data-a="pmusic"]')!.addEventListener('click', () => { unlockAudio(); save.musicOn = !save.musicOn; setMusicOn(save.musicOn); if (save.musicOn && battle) startMusic(battle.level.boss ? 'boss' : 'battle', save.music, battle.level.region); persist(); redraw(); });
+  el.querySelector('[data-a="psfx"]')!.addEventListener('click', () => { save.sound = !save.sound; setSound(save.sound); persist(); redraw(); });
+  el.querySelector('[data-a="php"]')!.addEventListener('click', () => { save.showHp = !save.showHp; renderer.showHp = save.showHp; persist(); redraw(); });
+  el.querySelectorAll<HTMLElement>('[data-ptrack]').forEach((b2) => b2.addEventListener('click', () => { unlockAudio(); save.music = b2.dataset.ptrack!; if (!save.musicOn) { save.musicOn = true; setMusicOn(true); } if (battle) { if (save.music === 'auto') startMusic(battle.level.boss ? 'boss' : 'battle', 'auto', battle.level.region); else playTrack(save.music, true); } persist(); redraw(); }));
   el.querySelector('[data-a="quit"]')!.addEventListener('click', () => {
     const L = battle?.level;
     if (battle) track('level_fail', { level: battle.level.index, reason: 'quit', seconds: Math.round(battle.time) });
@@ -1035,7 +1135,7 @@ function onBattleEnd(win: boolean) {
     }
     return;
   }
-  if (L.kind === 'challenge' || L.kind === 'daily' || L.kind === 'conquest') return onSpecialWin(b);
+  if (L.kind === 'challenge' || L.kind === 'daily' || L.kind === 'conquest' || L.kind === 'tower') return onSpecialWin(b);
 
   const stars = b.stars(true);
   const prev = save.stars[L.index] ?? 0;
@@ -1089,7 +1189,8 @@ function onBattleEnd(win: boolean) {
 }
 
 function backTo(L: LevelDef) {
-  if (L.kind === 'conquest') showFaction(factionById(L.id!.split('-')[0]));
+  if (L.kind === 'tower') showTower();
+  else if (L.kind === 'conquest') showFaction(factionById(L.id!.split('-')[0]));
   else if (L.kind === 'challenge') showChallenges();
   else if (L.kind === 'survival' || L.kind === 'daily') showModes();
   else showCampaign();
@@ -1099,7 +1200,12 @@ function onSpecialWin(b: Battle) {
   const L = b.level;
   let gold = 0, gems = 0;
   let unlocked: string[] = [];
-  if (L.kind === 'conquest') {
+  if (L.kind === 'tower') {
+    const n = Number(L.id), first = n > save.tower;
+    gold = Math.round(L.reward * (first ? 1 : 0.4));
+    gems = first ? (n % 10 === 0 ? 60 : n % 5 === 0 ? 25 : 8) : 0;
+    if (first) save.tower = n;
+  } else if (L.kind === 'conquest') {
     const [fid, ks] = L.id!.split('-');
     const k = Number(ks);
     const first = (save.conquest[fid] ?? 0) < k;
@@ -1151,6 +1257,7 @@ rolloverDaily();
 applySettings();
 onResize();
 showMenu();
+if (claimSubDaily()) setTimeout(() => toast(`<span class="toast-ico">📅</span><div><b>${t('subDaily')}</b></div>`), 800);
 void initCloud(() => { applySettings(); if (!battle) showMenu(); });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();

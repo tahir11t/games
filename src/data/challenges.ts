@@ -1,6 +1,6 @@
 import { UNITS, type EnemyId, type UnitId } from './units';
 import type { ChallengeId, AbilityId, PassiveId } from './skills';
-import { buildLevel, costOf, type LevelDef, type Mods, type RegionId, type Wave } from './levels';
+import { buildLevel, costOf, TUNE, type LevelDef, type Mods, type RegionId, type Wave } from './levels';
 
 export interface ChallengeDef {
   id: ChallengeId;
@@ -157,3 +157,34 @@ export function survivalWave(n: number, rnd: () => number): { unit: EnemyId; cou
   return res;
 }
 
+
+// ---------------- Trials Tower ----------------
+/** 40 floors; each has a rule, and every 5th floor a guardian boss. */
+export const TOWER_FLOORS = 40;
+export interface TowerRule { id: string; icon: string; mods?: Mods; allowed?: UnitId[]; extra?: (n: number) => Wave[]; region: RegionId }
+export const TOWER_RULES: TowerRule[] = [
+  { id: 'tr_none', icon: '⚔️', region: 'oasis' },
+  { id: 'd_speed', icon: '💨', mods: { enemySpeed: 1.35 }, region: 'dunes' },
+  { id: 'd_rush', icon: '🪙', mods: { goldMult: 2, enemyDmg: 1.3 }, region: 'mountains' },
+  { id: 'd_archers', icon: '🏹', allowed: ['miner', 'archer', 'crossbow', 'falcon', 'healer', 'genie', 'dragon', 'valkyrie', 'pharaoh', 'catapult'], region: 'forest' },
+  { id: 'd_beasts', icon: '🐺', extra: (n) => every(20, 160, 18, 'hyena', 2 + Math.floor(n / 10)), region: 'tundra' },
+  { id: 'd_nominers', icon: '🚫', mods: { noMiners: true }, region: 'graveyard' },
+  { id: 'd_sky', icon: '🦅', extra: (n) => every(25, 160, 20, 'vulture', 1 + Math.floor(n / 12)), region: 'shadow' },
+  { id: 'd_melee', icon: '🛡️', allowed: ['miner', 'sword', 'spear', 'camel', 'cavalry', 'lion', 'assassin', 'giant', 'elephant', 'hero', 'sultan', 'drummer', 'healer'], region: 'tombs' },
+];
+const TOWER_GUARDS: EnemyId[] = ['boss', 'scorpking', 'roc', 'worm', 'titan', 'djinn', 'cobraqueen', 'phoenix'];
+export function towerLevel(n: number): LevelDef {
+  const rule = TOWER_RULES[(n - 1) % TOWER_RULES.length];
+  const guard = n % 5 === 0;
+  const idx = Math.min(70, 6 + Math.round(n * 1.5));
+  // guardian floors field a lighter army: the guardian is the test
+  const base = buildLevel(idx, (TUNE[idx - 1] ?? 1) * (guard ? 0.7 : 1));
+  const waves: Wave[] = [...(rule.extra?.(n) ?? [])];
+  if (guard) waves.push({ t: 50, unit: TOWER_GUARDS[(n / 5 - 1) % TOWER_GUARDS.length], count: 1, mult: 0.16 + n * 0.005 });
+  return {
+    ...base, index: 500 + n, region: rule.region, boss: guard, kind: 'tower', id: String(n),
+    mods: rule.mods, allowed: rule.allowed, waves: waves.sort((a, b) => a.t - b.t),
+    reward: 150 + n * 35, noCounters: false, startGold: 200,
+  };
+}
+export const towerRule = (n: number) => TOWER_RULES[(n - 1) % TOWER_RULES.length];

@@ -39,6 +39,9 @@ export interface SaveData {
   musicRotate: number; // minutes between automatic track changes (0 = off)
   showHp: boolean;
   army: string; // 'desert' or a conquered civilization
+  tower: number; // highest Trials Tower floor cleared
+  sub: { plan: 'weekly' | 'monthly' | null; until: number; lastClaim: string | null; days: number };
+  purchases: string[]; // store product ids bought (test mode until Play Billing is wired)
   dailyDone: string | null;
   updatedAt: number;
 }
@@ -48,7 +51,7 @@ const KEY = 'sandwars.save.v1';
 /** Fill in fields added after a save was written (shallow + nested maps). */
 export function migrate(raw: Partial<SaveData>): SaveData {
   const d = defaultSave();
-  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars } };
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub } };
 }
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -87,6 +90,9 @@ export function defaultSave(): SaveData {
     musicRotate: 0,
     showHp: true,
     army: 'desert',
+    tower: 0,
+    sub: { plan: null, until: 0, lastClaim: null, days: 0 },
+    purchases: [],
     survivalBest: 0,
     dailyDone: null,
     updatedAt: Date.now(),

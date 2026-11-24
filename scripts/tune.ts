@@ -14,8 +14,8 @@ const winRate = (i: number, tune: number) => {
   return w / N;
 };
 // FROM/TO retune a range and keep the other levels' factors.
-const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 50), CAP = Number(process.env.CAP ?? 2);
-const out: number[] = Array.from({ length: 50 }, (_, k) => TUNE[k] ?? 1);
+const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 70), CAP = Number(process.env.CAP ?? 2);
+const out: number[] = Array.from({ length: 70 }, (_, k) => TUNE[k] ?? 1);
 for (let i = FROM; i <= TO; i++) {
   let lo = 0.35, hi = CAP + 0.1;
   for (let step = 0; step < 7; step++) {

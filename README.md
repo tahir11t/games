@@ -174,6 +174,20 @@ Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on me
 - **Combat feel:** melee lunges with squash and stretch, slash arcs, hit sparks, arrow and magic trails, footstep dust, rim lighting on characters.
 - **UI polish:** gradient title, layered panels and buttons, glass chips, vignette backgrounds, scrollable result panel.
 
+## v0.8: premium store, subscriptions, Trials Tower, 70 levels, in-game settings
+
+- **In-game settings** (⚙️ in the battle HUD / pause menu): music on/off, effects, track choice, health numbers.
+- **Premium store** (👑 tab in the shop). **Purchases are in TEST mode** (mock checkout, nothing charged). See `src/store.ts`; real payments need Google Play Billing plus server-side purchase verification before release.
+  - 4 legendary heroes, $3.99–$4.99:
+    - Golden Sultan: damage aura and healing pulse.
+    - Sand Dragon: flying fire breath.
+    - Sorcerer Pharaoh: summons mummies and raises the dead.
+    - Storm Valkyrie: flying chain lightning with stun.
+  - **Weekly ($1.99) / Monthly ($5.99) pass:** daily gold and gems (claimed automatically on launch or from the store), plus a free legend every 7 / 5 claimed days.
+  - Gem packs: $0.99 / $4.99 / $9.99.
+- **Trials Tower:** 40 floors, each with its own rule (fast enemies, ranged only, melee only, no miners, hyena raids, vulture skies…). A guardian boss every 5 floors; gem rewards per floor.
+- **Campaign extended to 70 levels:** Elven Forest (51–60, boss Elf Queen) and Frozen Tundra (61–70, boss Giant King).
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

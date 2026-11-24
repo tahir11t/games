@@ -58,6 +58,7 @@ export interface Unit {
   tripT: number; // time spent on the current mining trip
   hidden: boolean; // miner sheltering inside the fort
   stompCd: number;
+  auraCd: number;
   dmgText?: FloatText; // merges rapid hits into one rising number
 }
 
@@ -87,7 +88,7 @@ export interface BattleEvents {
   onRush?(): void;
 }
 
-export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId };
+export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId; extra?: EnemyId[] };
 const DEFAULT_PERKS: BattlePerks = {
   unitLevels: Object.fromEntries(Object.keys(UNITS).map((k) => [k, 1])) as Record<UnitId, number>,
   ability: 'volley',
@@ -164,7 +165,7 @@ export class Battle {
     this.diff = DIFFICULTY[this.perks.difficulty];
     // Playing as a conquered civilization swaps the unit bar (upgrades carry over by role).
     const army = this.perks.army ?? 'desert';
-    if (army !== 'desert') { const f = factionById(army); this.roster = rosterOf(f); this.roles = f.roles; this.playerMiner = f.miner; }
+    if (army !== 'desert') { const f = factionById(army); this.roster = [...rosterOf(f), ...(this.perks.extra ?? [])]; this.roles = f.roles; this.playerMiner = f.miner; }
     else this.roster = PLAYER_UNITS;
     this.allowed = level.allowed ?? null;
     const fort = 1500 * passiveFx.walls(this.perks.passives.walls);
@@ -237,7 +238,7 @@ export class Battle {
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
       chargeReady: !!def.charge, calm: 0, mineTimer: Math.random() * 2, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0,
-      summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0, carry: 0, tripT: 0, hidden: false,
+      summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0, auraCd: def.healAura?.every ?? 0, carry: 0, tripT: 0, hidden: false,
       tier: side === 0 ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
@@ -382,6 +383,15 @@ export class Battle {
           for (let i = 0; i < 18; i++) this.dust(u.x + (Math.random() - 0.5) * st.radius * 1.6, GROUND - 4, '#c9b28a', 5 + Math.random() * 6);
           const m = u.side === 0 ? upgradeMult(this.perks.unitLevels[(this.roles[u.def.id] ?? u.def.id) as UnitId] ?? 1) : this.enemyStat;
           for (const v of this.units) if (v.side !== u.side && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius) { this.applyDamage(v, st.dmg * m, true, u); if (!v.def.boss) v.stun = Math.max(v.stun, st.stun); }
+        }
+      }
+      if (u.def.healAura) { // royal pulse: heals every nearby ally
+        u.auraCd -= dt;
+        if (u.auraCd <= 0) {
+          u.auraCd = u.def.healAura.every;
+          for (const v of this.units) if (v.side === u.side && !v.dead && Math.abs(v.x - u.x) < u.def.healAura.radius && v.hp < v.maxHp) { v.hp = Math.min(v.maxHp, v.hp + v.maxHp * u.def.healAura.pct); v.healFx = 1; }
+          this.fx.push({ kind: 'spark', x: u.x, y: GROUND - 20, f: 1, life: 0.5, max: 0.5 });
+          for (let i = 0; i < 10; i++) this.dust(u.x + (Math.random() - 0.5) * u.def.healAura.radius * 1.6, GROUND - 10 - Math.random() * 40, '#ffe27a', 4);
         }
       }
       if (u.def.regen && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + u.def.regen * (u.maxHp / u.def.hp) * dt);
@@ -894,7 +904,7 @@ export class Battle {
 
   private projKind(u: Unit): Projectile['kind'] {
     const id = u.def.id;
-    return id === 'catapult' ? 'rock' : id === 'fire' ? 'fire' : id === 'crossbow' ? 'bolt' : ['sandmage', 'boss', 'djinn', 'genie', 'phoenix', 'banshee', 'necromancer', 'lich', 'thunderlord', 'elfqueen', 'poltergeist'].includes(id) ? (id === 'phoenix' ? 'fire' : 'magic') : 'arrow';
+    return id === 'catapult' ? 'rock' : id === 'fire' || id === 'dragon' ? 'fire' : id === 'crossbow' ? 'bolt' : ['sandmage', 'boss', 'djinn', 'genie', 'phoenix', 'banshee', 'necromancer', 'lich', 'thunderlord', 'elfqueen', 'poltergeist', 'pharaoh', 'valkyrie'].includes(id) ? (id === 'phoenix' ? 'fire' : 'magic') : 'arrow';
   }
 
   /** Guided arc: the shot keeps tracking the target, so moving units are hit. */

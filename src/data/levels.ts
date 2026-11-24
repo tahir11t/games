@@ -17,7 +17,7 @@ export type RegionId = 'oasis' | 'dunes' | 'mountains' | 'shadow' | 'tombs' | 'f
 
 export interface Wave { t: number; unit: EnemyId; count: number; mult?: number; }
 
-export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily' | 'conquest';
+export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily' | 'conquest' | 'tower';
 
 /** Battle-rule modifiers (challenges and the daily challenge). */
 export interface Mods {
@@ -65,13 +65,15 @@ export const REGIONS: { id: RegionId; from: number; to: number; enemy: EnemyId }
   { id: 'mountains', from: 21, to: 30, enemy: 'golem' },
   { id: 'shadow', from: 31, to: 40, enemy: 'ghost' },
   { id: 'tombs', from: 41, to: 50, enemy: 'mummy' },
+  { id: 'forest', from: 51, to: 60, enemy: 'elfarcher' },
+  { id: 'tundra', from: 61, to: 70, enemy: 'ogre' },
 ];
-export const LEVEL_COUNT = 50;
+export const LEVEL_COUNT = 70;
 
 export const regionOf = (i: number): RegionId => REGIONS.find((r) => i >= r.from && i <= r.to)!.id;
 
 /** Per-level difficulty factors produced by scripts/tune.ts (1 = untuned). */
-export const TUNE: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 2, 2.6, 2.8, 2.94, 2.53, 2.56, 2.46, 2.46, 2.38, 1.95, 2.36, 2.25, 2.28, 2.1, 2.08, 2, 1.98, 1.98, 1.9, 1.67, 2.05, 1.82, 1.98, 1.85, 1.91, 1.91, 1.76, 1.76, 1.72, 1.43, 1.76, 1.72, 1.76, 1.78, 1.68, 1.63, 1.66, 1.61, 1.66, 0.74];
+export const TUNE: number[] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 2, 2.6, 2.8, 2.94, 2.53, 2.56, 2.46, 2.46, 2.38, 1.95, 2.36, 2.25, 2.28, 2.1, 2.08, 2, 1.98, 1.98, 1.9, 1.67, 2.05, 1.82, 1.98, 1.85, 1.91, 1.91, 1.76, 1.76, 1.72, 1.43, 1.76, 1.72, 1.76, 1.78, 1.68, 1.63, 1.66, 1.61, 1.66, 0.74, 1.81, 1.64, 1.6, 1.55, 1.38, 1.25, 1.23, 1.3, 1.21, 0.74, 1.04, 1.12, 1.1, 1.21, 1.04, 1.1, 1.06, 0.97, 0.99, 0.54];
 
 export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef {
   const region = regionOf(index);
@@ -90,7 +92,9 @@ export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef
   if (index >= 28) pool.push('cavalry');
   if (regionIdx >= 3 && local >= 1) pool.push('ghost', 'ghost');
   if (index >= 36) pool.push('crossbow');
-  if (regionIdx >= 4) pool.push('mummy', 'skeleton', 'skeleton', 'cobra');
+  if (regionIdx === 4) pool.push('mummy', 'skeleton', 'skeleton', 'cobra');
+  if (regionIdx >= 5) pool.push('elfarcher', 'elfarcher', 'bladedancer', 'druid', local >= 4 ? 'treant' : 'elkrider');
+  if (regionIdx >= 6) pool.push('goblinspear', 'goblinspear', 'troll', 'ogre', local >= 5 ? 'frostgiant' : 'cyclops');
 
   // Difficulty curve: levels 1-5 very easy, a soft wall at 12 (PRD 6).
   let income = index <= 5 ? 0.5 + index * 0.06 : 0.82 + (index - 5) * 0.012;
@@ -99,7 +103,7 @@ export function buildLevel(index: number, tune = TUNE[index - 1] ?? 1): LevelDef
   income *= tune;
 
   const waves: Wave[] = [];
-  if (boss) waves.push({ t: 60, unit: index === 50 ? 'mummyking' : 'boss', count: 1 });
+  if (boss) waves.push({ t: 60, unit: index === 50 ? 'mummyking' : index === 60 ? 'elfqueen' : index === 70 ? 'giantking' : 'boss', count: 1 });
 
   return {
     index, region, boss,

@@ -547,7 +547,7 @@ export class Renderer {
       for (let k = 0; k < b.towerArchers[side]; k++) {
         const [ax, ay] = posts[k];
         const towerDef = UNITS[({ elves: 'elfarcher', ghosts: 'banshee', zombies: 'skelarcher', dwarves: 'axethrower' } as Record<string, EnemyId>)[style] ?? 'archer'];
-        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
+        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
         c.save(); c.translate(ax, ay); c.scale(0.8, 0.8); c.translate(-ax, -ay - 4);
         drawArt({ c, u: a, x: ax, gy: ay, f, t: time + k, swing: 0, atk, side, region, flash: false, tier: a.tier });
         c.restore();
@@ -636,7 +636,7 @@ export class Renderer {
     const wide = ['camel', 'cavalry', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss', 'elephant', 'cobra', 'cobraqueen'].includes(def.id) ? 1.5 : 1;
     const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
     ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
-    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, carry: 0, tripT: 0, hidden: false, tier };
+    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier };
     const y = def.flying ? GROUND - 30 : GROUND;
     drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 1, swing: 0, atk: 0, side, region: 'oasis', flash: false, tier });
     return cv.toDataURL();

@@ -644,6 +644,26 @@ function drawArtInner(a: ArtCtx) {
     case 'giantking': return human(a, h, { skin: '#c9a882', cloth: '#5a1f2a', trim: '#ffd34d', angry: true,
       head: (hx, hy, r) => { beard(c, hx, hy, r, f, '#8a5a2a', true); crownAt(c, hx, hy - r * 0.9, r * 0.7); },
       weapon: (hx, hy, ang) => { const b2 = ang - f * 0.8; const ex = hx + Math.cos(b2) * h * 0.5, ey = hy + Math.sin(b2) * h * 0.5; line(c, hx, hy, ex, ey, '#6b4423', 6); c.save(); c.translate(ex, ey); c.rotate(b2); c.beginPath(); c.roundRect(-12, -16, 24, 32, 4); fillStroke(c, vgrad(c, '#8d8578', -16, 16), 2.5); c.restore(); } });
+    // --- Premium legends ---
+    case 'sultan': return human(a, h, { skin, cloth: '#7a1fa8', trim: '#ffd34d',
+      back: (sx, sy) => poly(c, [sx - 10, sy - 6, sx + 10, sy - 6, sx - f * 32 + Math.sin(t * 3) * 4, gy - 4, sx - f * 6, gy - 2], '#c0392b'),
+      head: (hx, hy, r) => { c.beginPath(); c.ellipse(hx, hy - r * 0.55, r * 1.2, r * 0.75, 0, Math.PI, 0); c.closePath(); fillStroke(c, vgrad(c, '#fff6e0', hy - r * 1.3, hy)); c.save(); c.strokeStyle = '#ffd34d'; c.lineWidth = 2; c.beginPath(); c.moveTo(hx - r * 1.1, hy - r * 0.6); c.quadraticCurveTo(hx, hy - r * 1.2, hx + r * 1.1, hy - r * 0.6); c.stroke(); c.restore(); glowDot(c, hx + f * r * 0.1, hy - r * 0.95, r * 0.2, '#e0453a', '#ffd0d0'); c.save(); c.strokeStyle = '#3a2210'; c.lineWidth = r * 0.25; c.beginPath(); c.moveTo(hx + f * r * 0.1, hy + r * 0.55); c.quadraticCurveTo(hx + f * r * 0.4, hy + r * 0.75, hx + f * r * 0.75, hy + r * 0.5); c.stroke(); c.restore(); },
+      weapon: (hx, hy, ang) => { scimitar(c, f, h * 0.55)(hx, hy, ang); glowDot(c, hx, hy, 3, '#ffd34d'); } });
+    case 'dragon': return dragon(a);
+    case 'pharaoh': return human(a, h, { skin: '#c98f62', cloth: '#f4ecd8', trim: '#2a6fb5', robe: true,
+      head: (hx, hy, r) => { c.beginPath(); c.arc(hx, hy, r * 1.08, Math.PI * 1.05, Math.PI * 1.95); c.lineTo(hx + r * 0.9, hy - r * 0.45); c.quadraticCurveTo(hx, hy - r * 0.75, hx - r * 0.9, hy - r * 0.45); c.closePath(); fillStroke(c, '#ffd34d');
+        for (const sd of [-1, 1]) { poly(c, [hx + sd * r * 0.85, hy - r * 0.5, hx + sd * r * 1.3, hy - r * 0.2, hx + sd * r * 1.25, hy + r * 1.3, hx + sd * r * 0.8, hy + r * 1.0], '#ffd34d', 2); c.fillStyle = '#2a6fb5'; for (let i = 0; i < 4; i++) c.fillRect(hx + sd * r * 1.05 - r * 0.2, hy - r * 0.05 + i * r * 0.32, r * 0.4, r * 0.12); }
+        poly(c, [hx - r * 0.12, hy - r * 1.05, hx, hy - r * 1.5, hx + r * 0.12, hy - r * 1.05], '#2a6fb5', 1.4); c.fillStyle = '#1b1b1b'; c.fillRect(hx + f * r * 0.15, hy + r * 0.6, f * r * 0.2, r * 0.45); },
+      armAng: f > 0 ? -0.9 - a.atk * 0.4 : Math.PI + 0.9 + a.atk * 0.4,
+      weapon: (hx, hy) => { line(c, hx, hy - 6, hx, hy + h * 0.55, '#ffd34d', 3); c.save(); c.strokeStyle = '#ffd34d'; c.lineWidth = 3; c.beginPath(); c.arc(hx, hy - 12, 6, Math.PI, 0); c.stroke(); c.restore(); glowDot(c, hx, hy - 12, 4 + a.atk * 3, '#7fd8ff'); } });
+    case 'valkyrie': { const y = gy - 8 + Math.sin(t * 3 + a.u.uid) * 3; const flap = Math.sin(t * 6);
+      for (const sd of [1, -1]) { c.save(); c.translate(x - f * 4, y - h * 0.7); c.scale(-f, 1); c.rotate(sd * 0.15 - 0.4 + flap * 0.25 * sd);
+        for (let k = 0; k < 4; k++) { c.fillStyle = k % 2 ? '#f4f8ff' : '#dfe8f6'; c.strokeStyle = '#22140a'; c.lineWidth = 1.6; c.beginPath(); c.ellipse(14 + k * 9, -6 - k * 5, 18 - k * 2, 6, -0.5 - k * 0.12, 0, 7); c.fill(); c.stroke(); } c.restore(); }
+      human({ ...a, gy: y }, h, { skin: '#f2d2b0', cloth: '#3f6fa8', trim: '#ffd34d', noLegs: true,
+        head: (hx, hy, r) => { c.save(); c.strokeStyle = '#f2e6a8'; c.lineWidth = r * 0.45; c.beginPath(); c.moveTo(hx, hy - r); c.quadraticCurveTo(hx - f * r * 2, hy, hx - f * r * 1.6, hy + r * 2); c.stroke(); c.restore(); c.beginPath(); c.arc(hx, hy - r * 0.1, r * 1.06, Math.PI, 0); c.closePath(); fillStroke(c, vgrad(c, '#d5dde5', hy - r * 1.2, hy)); for (const sd of [-1, 1]) poly(c, [hx + sd * r * 0.9, hy - r * 0.4, hx + sd * r * 1.8, hy - r * 1.2, hx + sd * r * 1.3, hy - r * 0.3], '#ffffff', 1.4); },
+        armAng: f > 0 ? -0.3 - a.atk * 0.4 : Math.PI + 0.3 + a.atk * 0.4,
+        weapon: (hx, hy, ang) => { const ex = hx + Math.cos(ang) * h * 0.6, ey = hy + Math.sin(ang) * h * 0.6; line(c, hx - Math.cos(ang) * 12, hy - Math.sin(ang) * 12, ex, ey, '#c9a24a', 3); poly(c, [ex - 4, ey - 4, ex + Math.cos(ang) * 14, ey + Math.sin(ang) * 14, ex + 4, ey + 4], '#dfe6ec', 1.5); if (a.atk > 0.2) glowDot(c, ex, ey, 6, '#bfe8ff'); } });
+      return; }
     // --- civilization specials & heroes ---
     case 'sprite': { const y = gy - 6 + Math.sin(t * 5 + a.u.uid) * 3;
       for (const sd of [-1, 1]) { c.save(); c.globalAlpha *= 0.6; c.fillStyle = '#c8f4ff'; c.beginPath(); c.ellipse(x - f * 4 + sd * 2, y - 26, 9, 5 + Math.abs(Math.sin(t * 20)) * 4, sd * 0.6, 0, 7); c.fill(); c.restore(); }
@@ -969,6 +989,35 @@ function mammoth(a: ArtCtx) {
   const rider: ArtCtx = { ...a, x: x - f * 6 * s, gy: by - 24 * s, swing: 0 };
   human(rider, 40, { ...goblinLook(c, f), noLegs: true, armAng: f > 0 ? 0.1 : Math.PI - 0.1,
     weapon: (hx2, hy2) => { line(c, hx2 - f * 10, hy2, hx2 + f * 30, hy2, '#8b5a2b', 2.5); poly(c, [hx2 + f * 30, hy2 - 4, hx2 + f * 40, hy2, hx2 + f * 30, hy2 + 4], '#cfd6dc', 1.5); } });
+}
+
+function dragon(a: ArtCtx) {
+  const { c, x, gy, f, t, atk } = a;
+  const s = a.u.def.height / 96;
+  const y = gy - 10 + Math.sin(t * 2.5 + a.u.uid) * 5;
+  const body = '#d98a2b', belly = '#f6d68a', wing = '#a84a1f';
+  const flap = Math.sin(t * 5);
+  // far wing
+  poly(c, [x - f * 6 * s, y - 30 * s, x - f * 50 * s, y - (70 + flap * 30) * s, x - f * 70 * s, y - (30 + flap * 18) * s, x - f * 20 * s, y - 20 * s], shade(wing, -0.15), 2);
+  // tail
+  c.save(); c.strokeStyle = OUT; c.lineWidth = 12 * s + 2.6; c.lineCap = 'round'; c.beginPath(); c.moveTo(x - f * 24 * s, y - 20 * s); c.quadraticCurveTo(x - f * 60 * s, y - 4 * s + Math.sin(t * 3) * 6, x - f * 84 * s, y - 24 * s); c.stroke(); c.strokeStyle = body; c.lineWidth = 12 * s; c.stroke(); c.restore();
+  poly(c, [x - f * 82 * s, y - 24 * s, x - f * 96 * s, y - 36 * s, x - f * 94 * s, y - 16 * s], wing, 2);
+  // body
+  ellipse(c, x, y - 24 * s, 34 * s, 20 * s, body);
+  c.fillStyle = belly; c.beginPath(); c.ellipse(x + f * 4 * s, y - 16 * s, 22 * s, 9 * s, 0, 0, Math.PI); c.fill();
+  // neck + head
+  c.save(); c.strokeStyle = OUT; c.lineWidth = 14 * s + 2.6; c.lineCap = 'round'; c.beginPath(); c.moveTo(x + f * 24 * s, y - 30 * s); c.quadraticCurveTo(x + f * 40 * s, y - 56 * s, x + f * 52 * s, y - 58 * s); c.stroke(); c.strokeStyle = body; c.lineWidth = 14 * s; c.stroke(); c.restore();
+  const hx = x + f * 58 * s, hy = y - 60 * s;
+  ellipse(c, hx, hy, 16 * s, 11 * s, body);
+  poly(c, [hx + f * 8 * s, hy - 2 * s, hx + f * 26 * s, hy + 4 * s, hx + f * 8 * s, hy + 9 * s], body, 2);
+  for (const k of [-1, 1]) poly(c, [hx - f * 6 * s, hy - 8 * s, hx - f * (16 + k * 3) * s, hy - 24 * s, hx - f * 2 * s, hy - 10 * s], '#f4ecd8', 1.6);
+  eyes(c, hx + f * 2 * s, hy - 3 * s, 10 * s, f, true, '#ffe14d');
+  if (atk > 0.2) { c.save(); c.globalCompositeOperation = 'lighter'; for (let i = 0; i < 5; i++) { c.fillStyle = i % 2 ? 'rgba(255,200,60,.7)' : 'rgba(255,90,30,.6)'; c.beginPath(); c.arc(hx + f * (30 + i * 12) * s, hy + 6 * s + i * 3, (5 + i * 2) * s, 0, 7); c.fill(); } c.restore(); }
+  // near wing
+  poly(c, [x - f * 2 * s, y - 34 * s, x - f * 30 * s, y - (84 + flap * 34) * s, x - f * 58 * s, y - (40 + flap * 20) * s, x - f * 12 * s, y - 24 * s], wing, 2.2);
+  c.save(); c.strokeStyle = 'rgba(40,15,5,.5)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x - f * 2 * s, y - 34 * s); c.lineTo(x - f * 44 * s, y - (60 + flap * 26) * s); c.stroke(); c.restore();
+  // legs
+  for (const k of [-8, 10]) line(c, x + f * k * s, y - 8 * s, x + f * (k + 4) * s, y + 4 * s, body, 5 * s);
 }
 
 export function isBossy(id: string) { return ['boss', 'scorpking', 'roc', 'worm', 'titan', 'djinn', 'warlord', 'mummyking', 'cobraqueen', 'phoenix', 'elfqueen', 'ghostking', 'plaguelord', 'dwarfking', 'giantking'].includes(id); }
