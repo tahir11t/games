@@ -371,11 +371,11 @@ h1, h2, h3 { margin: 0; }
 
 /* ---- v1.0: battle HUD ---- */
 .bonds-chip { gap: 4px; font-size: 17px; background: linear-gradient(90deg, rgba(31,158,143,.55), rgba(0,0,0,.4)); }
-.ubtn .rep { position: absolute; top: 2px; inset-inline-start: 4px; font-size: 13px; font-weight: 900; background: #1f9e8f; color: #fff; border-radius: 8px; padding: 0 5px; animation: spin 2.4s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.ubtn .rep { position: absolute; top: 2px; inset-inline-start: 4px; font-size: 13px; font-weight: 900; background: #1f9e8f; color: #fff; border-radius: 8px; padding: 0 5px; animation: repSpin 2.4s linear infinite; }
+@keyframes repSpin { to { transform: rotate(360deg); } }
 .unit-tip small.auto { display: block; margin-top: 3px; color: #7df9e8; }
-.perfect-pop { position: absolute; top: 30%; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 900; color: #7df9ff; text-shadow: 0 3px 0 #04323a, 0 0 18px rgba(125,249,255,.6); pointer-events: none; animation: pop .9s ease-out forwards; }
-@keyframes pop { 0% { transform: scale(.6); opacity: 0; } 25% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1) translateY(-20px); opacity: 0; } }
+.perfect-pop { position: absolute; top: 30%; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 900; color: #7df9ff; text-shadow: 0 3px 0 #04323a, 0 0 18px rgba(125,249,255,.6); pointer-events: none; animation: perfectPop .9s ease-out forwards; }
+@keyframes perfectPop { 0% { transform: scale(.6); opacity: 0; } 25% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1) translateY(-20px); opacity: 0; } }
 [data-a="formation"] span { font-size: 20px; }
 
 /* ---- v1.0: scout report ---- */
@@ -406,3 +406,34 @@ h1, h2, h3 { margin: 0; }
 .prebattle { max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; touch-action: pan-y; }
 .scout-sep { width: 1px; align-self: stretch; background: rgba(255,211,77,.3); margin: 0 6px; }
 @media (max-height: 430px) { .prebattle { gap: 4px; padding: 8px 14px; } .prebattle h2 { font-size: 26px !important; margin: 0; } .prebattle .big-stars { font-size: 22px !important; margin: 0; } .scout-row img { width: 32px; height: 32px; } .scout { padding: 4px 8px; } }
+
+/* ---- v1.1: global ranking ---- */
+.lb-wrap { flex: 1; min-height: 0; display: flex; gap: 12px; padding-top: 8px; }
+.lb-profile { flex: 0 0 240px; display: flex; flex-direction: column; gap: 8px; align-self: flex-start; }
+.lb-profile label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); font-weight: 700; }
+.lb-profile input, .lb-profile select { font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 10px; border: 2px solid #8a6236; background: rgba(0,0,0,.35); color: var(--sand); user-select: text; -webkit-user-select: text; }
+.lb-me { font-size: 22px; font-weight: 900; color: var(--gold2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-main { flex: 1; min-width: 0; min-height: 0; gap: 6px; }
+.lb-mine { align-self: flex-start; }
+.lb-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; display: flex; flex-direction: column; gap: 4px; }
+.lb-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 12px; background: rgba(0,0,0,.28); }
+.lb-row.me { background: linear-gradient(90deg, rgba(255,211,77,.3), rgba(0,0,0,.3)); border: 1px solid var(--gold2); }
+.lb-pos { width: 34px; text-align: center; font-weight: 900; }
+.lb-flag { font-size: 22px; }
+.lb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.lb-row small { color: var(--gold2); font-weight: 900; }
+.lb-score { font-size: 18px; color: var(--gold2); }
+.lb-note { text-align: center; color: var(--muted); padding: 30px 10px; font-weight: 700; }
+@media (max-width: 760px), (max-height: 430px) { .lb-wrap { flex-direction: column; overflow-y: auto; } .lb-profile { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; align-items: flex-end; align-self: stretch; } .lb-list { overflow: visible; } }
+
+/* ---- v1.1: scripts & accessibility ---- */
+:root[lang="hi"] { --font: 'Noto Sans Devanagari', 'Cairo', system-ui, sans-serif; }
+:root[lang="zh"] { --font: 'Noto Sans SC', 'Cairo', system-ui, sans-serif; }
+:root[lang="ja"] { --font: 'Noto Sans JP', 'Cairo', system-ui, sans-serif; }
+:root[lang="hi"] body { line-height: 1.5; }
+.lang-grid [lang="hi"] { font-family: 'Noto Sans Devanagari', sans-serif; }
+.lang-grid [lang="zh"] { font-family: 'Noto Sans SC', sans-serif; }
+.lang-grid [lang="ja"] { font-family: 'Noto Sans JP', sans-serif; }
+/* Reduce motion: stop bouncing, spinning and popping (fades stay so banners still appear and vanish). */
+:root.calm .hint, :root.calm .ubtn .rep, :root.calm .perfect-pop, :root.calm .big-stars span, :root.calm .abtn.ready { animation: none !important; }
+:root.calm .btn, :root.calm .ubtn, :root.calm .tbtn { transition: none !important; }

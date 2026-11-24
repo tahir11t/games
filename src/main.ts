@@ -1,6 +1,8 @@
 import './style.css';
-import { t, tk, setLang, num, isRtl, LANGS, type Key, type Lang } from './i18n';
-import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents } from './save';
+import { t, tk, tn, setLang, num, price, isRtl, LANGS, getLang, type Key, type Lang } from './i18n';
+import { BOARDS, submitAll, fetchTop, rankOf, myBest, flag, displayName, cleanName, COUNTRIES, type Board } from './leaderboard';
+import { a11y } from './game/render';
+import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents, currentUser } from './save';
 import { UNITS, PLAYER_UNITS, BASE_UNITS, MAX_UNIT_LEVEL, upgradeCost, upgradeMult, type UnitId } from './data/units';
 import { LEVELS, REGIONS, type RegionId, type LevelDef } from './data/levels';
 import { ABILITIES, PASSIVES, PASSIVE_MAX, UNIT_SHOP, type AbilityId, type PassiveId, type Requirement, type Perks } from './data/skills';
@@ -13,7 +15,7 @@ import { PREMIUM_UNITS, type EnemyId } from './data/units';
 import { PRODUCTS, SUB_PLANS, TEST_MODE, type Product } from './store';
 import { TOWER_FLOORS, towerLevel, towerRule } from './data/challenges';
 import { DIFFICULTY, tierOf, MAX_TOWER_ARCHERS, FORMATIONS, BONDS, type Difficulty, type BondId } from './game/battle';
-import { setLowQuality, drawArt } from './game/art';
+import { setLowQuality, drawArt, setColorblind } from './game/art';
 import { LEVEL_COUNT } from './data/levels';
 
 const ui = document.getElementById('ui')!;
@@ -83,6 +85,10 @@ function applySettings() {
   setLowQuality(save.quality === 'low');
   setRotation(save.musicRotate);
   renderer.showHp = save.showHp;
+  if (a11y.colorblind !== save.a11y.colorblind) { enemyIcons.clear(); for (const k in facIcons) delete facIcons[k]; for (const k in bossIcons) delete bossIcons[k]; }
+  a11y.colorblind = save.a11y.colorblind; a11y.calm = save.a11y.calm;
+  setColorblind(save.a11y.colorblind);
+  document.documentElement.classList.toggle('calm', save.a11y.calm);
   document.querySelectorAll<HTMLElement>('[data-t]').forEach((el) => (el.textContent = t(el.dataset.t as Key)));
 }
 
@@ -286,6 +292,53 @@ function codexDetail(id: EnemyId, side: 0 | 1, tags: (id: EnemyId) => string) {
   $(ov, '[data-a="close"]').addEventListener('click', () => { sfx('click'); close(); });
 }
 
+// ---------------- Global leaderboard ----------------
+let lbBoard: Board = 'survival';
+const BOARD_ICON: Record<Board, string> = { survival: '♾️', tower: '🗼', stars: '⭐' };
+/** Localised country name ("Saudi Arabia" / "السعودية" / "サウジアラビア"). */
+function countryName(cc: string) { try { return new Intl.DisplayNames([getLang()], { type: 'region' }).of(cc) ?? cc; } catch { return cc; } }
+/** Posts best scores when online; quiet when offline. */
+function syncScores() { if (cloudOnline) void submitAll(t('defaultName')); }
+function showLeaderboard() {
+  const countries = [...COUNTRIES].sort((a, b) => countryName(a).localeCompare(countryName(b), getLang()));
+  const el = h(`<div class="screen">${topbar()}
+    <div class="lb-wrap">
+      <div class="panel lb-profile">
+        <div class="lb-me">${flag(save.profile.country)} <b data-r="myname"></b></div>
+        <label>${t('playerName')}<input data-r="name" maxlength="20" value="${cleanName(save.profile.name).replace(/"/g, '')}" placeholder="${displayName(t('defaultName'))}" dir="auto"></label>
+        <label>${t('country')}<select data-r="cc"><option value="">🏳️ ${t('noCountry')}</option>${countries.map((cc) => `<option value="${cc}" ${save.profile.country === cc ? 'selected' : ''}>${flag(cc)} ${countryName(cc)}</option>`).join('')}</select></label>
+        <button class="btn small" data-a="savep">✓ ${t('saveBtn')}</button>
+      </div>
+      <div class="col lb-main">
+        <div class="tabs">${BOARDS.map((bd) => `<button class="tab ${bd === lbBoard ? 'on' : ''}" data-b="${bd}">${BOARD_ICON[bd]} ${t(('lb_' + bd) as Key)}</button>`).join('')}</div>
+        <div class="lb-mine chip">${t('yourRank')}: <b data-r="rank">…</b> · ${BOARD_ICON[lbBoard]} ${num(myBest(lbBoard))}</div>
+        <div class="lb-list" data-r="list"><div class="lb-note">…</div></div>
+      </div>
+    </div>
+  </div>`);
+  $(el, '[data-r="myname"]').textContent = displayName(t('defaultName'));
+  el.querySelectorAll<HTMLElement>('[data-b]').forEach((b) => b.addEventListener('click', () => { sfx('click'); lbBoard = b.dataset.b as Board; showLeaderboard(); }));
+  $(el, '[data-a="savep"]').addEventListener('click', () => {
+    save.profile.name = cleanName($<HTMLInputElement>(el, '[data-r="name"]').value);
+    save.profile.country = $<HTMLSelectElement>(el, '[data-r="cc"]').value || null;
+    persist(); sfx('coin'); syncScores(); setTimeout(showLeaderboard, 600);
+  });
+  mount(el);
+  const list = $(el, '[data-r="list"]');
+  if (!cloudOnline) { list.innerHTML = `<div class="lb-note">📡 ${t('lbOffline')}</div>`; $(el, '[data-r="rank"]').textContent = '—'; return; }
+  void (async () => {
+    await submitAll(t('defaultName'));
+    const [rows, rank] = await Promise.all([fetchTop(lbBoard), rankOf(lbBoard, myBest(lbBoard))]);
+    if (!el.isConnected) return;
+    $(el, '[data-r="rank"]').textContent = rank ? '#' + num(rank) : '—';
+    if (!rows) { list.innerHTML = `<div class="lb-note">📡 ${t('lbOffline')}</div>`; return; }
+    if (!rows.length) { list.innerHTML = `<div class="lb-note">🏁 ${t('lbEmpty')}</div>`; return; }
+    const me = currentUser();
+    list.innerHTML = rows.map((r, i) => `<div class="lb-row ${r.user_id === me ? 'me' : ''}"><span class="lb-pos">${i < 3 ? ['🥇', '🥈', '🥉'][i] : num(i + 1)}</span><span class="lb-flag" title="${r.country ? countryName(r.country) : ''}">${flag(r.country)}</span><bdi class="lb-name"></bdi>${r.user_id === me ? `<small>${t('you')}</small>` : ''}<b class="lb-score">${num(r.score)}</b></div>`).join('');
+    list.querySelectorAll('.lb-name').forEach((n, i) => (n.textContent = rows[i].name)); // names via textContent: never parsed as HTML
+  })();
+}
+
 // ---------------- Menu ----------------
 function showMenu() {
   stopBattleLoop();
@@ -306,6 +359,7 @@ function showMenu() {
           <button class="btn secondary" data-go="army">🛡️ ${t('myArmy')}</button>
           <button class="btn secondary" data-go="ach">🏅 ${t('achievements')} <small>${num(save.achievements.length)}/${num(ACH.length)}</small></button>
           <button class="btn secondary" data-go="codex">📖 ${t('codex')}</button>
+          <button class="btn secondary" data-go="world">🌍 ${t('leaderboard')}</button>
           <button class="btn secondary" data-go="settings">⚙️ ${t('settings')}</button>
         </div>
       </div>
@@ -323,6 +377,7 @@ function showMenu() {
     if (go === 'ach') showAchievements();
     if (go === 'army') showArmies();
     if (go === 'codex') showCodex();
+    if (go === 'world') showLeaderboard();
   }));
   mount(el);
 }
@@ -413,7 +468,7 @@ function showRewards() {
     <div class="rewards">
       <div class="col panel">
         <h3>📅 ${t('daily')}</h3>
-        <div class="calendar">${DAILY.map((r, i) => `<div class="day ${i < dayIdx ? 'done' : ''} ${i === dayIdx ? 'today' : ''}">${t('day')} ${num(i + 1)}<b>${rewardLabel(r)}</b></div>`).join('')}</div>
+        <div class="calendar">${DAILY.map((r, i) => `<div class="day ${i < dayIdx ? 'done' : ''} ${i === dayIdx ? 'today' : ''}">${tn('day', i + 1)}<b>${rewardLabel(r)}</b></div>`).join('')}</div>
         <button class="btn" data-a="daily" ${canClaimDaily() ? '' : 'disabled'}>${canClaimDaily() ? t('claim') : t('claimed')}</button>
         <h3 style="margin-top:6px">📜 ${t('quests')}</h3>
         ${QUESTS.map((q) => {
@@ -489,12 +544,17 @@ function showSettings() {
           <b>📳 ${t('vibrate')}</b><button class="btn small ${save.vibrate ? '' : 'secondary'}" data-a="vib">${save.vibrate ? t('on') : t('off')}</button></div>
         <div class="row"><b class="grow">🎥 ${t('camera')}</b>${(['both', 'arrows', 'touch'] as const).map((m) => `<button class="btn small ${save.camMode === m ? '' : 'secondary'}" data-cam="${m}">${t(m === 'both' ? 'camBoth' : m === 'arrows' ? 'camArrows' : 'camTouch')}</button>`).join('')}</div>
         <div class="row"><b class="grow">🖼️ ${t('quality')}</b>${(['auto', 'high', 'low'] as const).map((q) => `<button class="btn small ${save.quality === q ? '' : 'secondary'}" data-q="${q}">${t(('q_' + q) as Key)}</button>`).join('')}</div>
+        <div class="row"><b class="grow">♿ ${t('accessibility')}</b>
+          <button class="btn small ${save.a11y.colorblind ? '' : 'secondary'}" data-a="cb">🎨 ${t('colorblind')}</button>
+          <button class="btn small ${save.a11y.calm ? '' : 'secondary'}" data-a="calm">🌙 ${t('calm')}</button></div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v1.0.0</div>
+        <div style="font-size:12px;color:var(--muted)">v1.1.0</div>
       </div>
     </div>
   </div>`);
   el.querySelectorAll<HTMLElement>('[data-lang]').forEach((b) => b.addEventListener('click', () => { save.lang = b.dataset.lang as Lang; persist(); applySettings(); showSettings(); }));
+  el.querySelector('[data-a="cb"]')!.addEventListener('click', () => { save.a11y.colorblind = !save.a11y.colorblind; persist(); applySettings(); showSettings(); });
+  el.querySelector('[data-a="calm"]')!.addEventListener('click', () => { save.a11y.calm = !save.a11y.calm; persist(); applySettings(); showSettings(); });
   el.querySelector('[data-a="vib"]')!.addEventListener('click', () => { save.vibrate = !save.vibrate; persist(); if (save.vibrate) buzz(40); showSettings(); });
   el.querySelector('[data-a="sound"]')!.addEventListener('click', () => { save.sound = !save.sound; persist(); setSound(save.sound); showSettings(); });
   el.querySelector('[data-a="music"]')!.addEventListener('click', () => { save.musicOn = !save.musicOn; persist(); setMusicOn(save.musicOn); if (save.musicOn) startMusic('menu', save.music); showSettings(); });
@@ -704,7 +764,7 @@ function checkout(p: Product): Promise<boolean> {
     const el = h(`<div class="screen dim" style="z-index:70"><div class="panel col" style="align-items:center;text-align:center;min-width:300px">
       <div style="font-size:12px;color:#ffb38a">${TEST_MODE ? '🧪 ' + t('testPurchase') : ''}</div>
       <h3>${p.kind === 'hero' ? tk('u_' + p.unit) : p.kind === 'sub' ? tk('sub_' + p.plan) : '💎 ' + num(p.gems!)}</h3>
-      <div style="font-size:30px;font-weight:900;color:var(--gold2)">${p.price}</div>
+      <div style="font-size:30px;font-weight:900;color:var(--gold2)">${price(p.usd)}</div>
       <div class="row"><button class="btn secondary" data-a="no">${t('back')}</button><button class="btn" data-a="yes">${t('buy')}</button></div></div></div>`);
     document.getElementById('app')!.appendChild(el);
     el.querySelector('[data-a="no"]')!.addEventListener('click', () => { el.remove(); resolve(false); });
@@ -735,14 +795,14 @@ function showPremium() {
     const u = p.unit!, d = UNITS[u], own = save.owned.includes(u);
     return `<div class="legend-card ${own ? 'owned' : ''}"><img src="${iconFor(u)}" alt=""><div class="meta"><b>👑 ${tk('u_' + u)}</b><small>${tk('ud_' + u)}</small>
       <small>❤️ ${num(d.hp)} · ⚔️ ${num(d.dmg)}${d.flying ? ' · 🪽' : ''}</small></div>
-      ${own ? `<span class="chip">✓ ${t('owned')}</span>` : `<button class="btn small" data-buy="${p.id}">${p.price}</button>`}</div>`;
+      ${own ? `<span class="chip">✓ ${t('owned')}</span>` : `<button class="btn small" data-buy="${p.id}">${price(p.usd)}</button>`}</div>`;
   }).join('');
   const subs = (['weekly', 'monthly'] as const).map((plan) => {
     const p = PRODUCTS.find((x) => x.plan === plan)!, P = SUB_PLANS[plan], active = subActive() && save.sub.plan === plan;
     return `<div class="sub-card ${plan} ${active ? 'on' : ''}"><b>${tk('sub_' + plan)}</b><div class="sub-perks">🪙 ${num(P.gold)} + 💎 ${num(P.gems)} ${t('perDay')}<br>👑 ${t('legendEvery')} ${num(P.heroAfter)} ${t('daysWord')}</div>
-      ${active ? `<div class="chip">⏳ ${num(Math.ceil((save.sub.until - Date.now()) / 86400000))} ${t('daysWord')}</div><button class="btn small ${save.sub.lastClaim === todayStr() ? 'secondary' : ''}" data-claim ${save.sub.lastClaim === todayStr() ? 'disabled' : ''}>${save.sub.lastClaim === todayStr() ? t('claimed') : t('claim')}</button>` : `<button class="btn small" data-buy="${p.id}">${p.price}</button>`}</div>`;
+      ${active ? `<div class="chip">⏳ ${num(Math.ceil((save.sub.until - Date.now()) / 86400000))} ${t('daysWord')}</div><button class="btn small ${save.sub.lastClaim === todayStr() ? 'secondary' : ''}" data-claim ${save.sub.lastClaim === todayStr() ? 'disabled' : ''}>${save.sub.lastClaim === todayStr() ? t('claimed') : t('claim')}</button>` : `<button class="btn small" data-buy="${p.id}">${price(p.usd)}</button>`}</div>`;
   }).join('');
-  const gems = PRODUCTS.filter((p) => p.kind === 'gems').map((p) => `<button class="gem-pack" data-buy="${p.id}"><span>💎</span><b>${num(p.gems!)}</b><small>${p.price}</small></button>`).join('');
+  const gems = PRODUCTS.filter((p) => p.kind === 'gems').map((p) => `<button class="gem-pack" data-buy="${p.id}"><span>💎</span><b>${num(p.gems!)}</b><small>${price(p.usd)}</small></button>`).join('');
   const el = h(`<div class="screen">${topbar()}<div class="tabs" style="margin-top:10px">${tabs}</div>
     <div class="premium">
       <div class="prem-sec"><h3>👑 ${t('legends')}</h3><div class="legend-grid">${heroes}</div></div>
@@ -1243,7 +1303,7 @@ function updateHud() {
   mx.clearRect(0, 0, mc.width, mc.height);
   mx.fillStyle = b.well.owner === 0 ? '#7dff9a' : b.well.owner === 1 ? '#ff7a6a' : 'rgba(255,255,255,.5)'; mx.beginPath(); mx.arc(W / 2 * k, mc.height - 6, 4, 0, 7); mx.fill();
   for (const d of b.drops) { mx.fillStyle = '#ffe066'; mx.fillRect(d.x * k - 2, mc.height - 10, 4, 4); }
-  for (const u of b.units) { if (u.dead || u.def.miner) continue; mx.fillStyle = u.side ? '#e0453a' : '#ffd34d'; mx.fillRect(u.x * k - 2, u.def.flying ? 4 : 12, u.def.boss ? 8 : 4, u.def.boss ? 14 : 10); }
+  for (const u of b.units) { if (u.dead || u.def.miner) continue; mx.fillStyle = u.side ? (save.a11y.colorblind ? '#4d8fff' : '#e0453a') : '#ffd34d'; mx.fillRect(u.x * k - 2, u.def.flying ? 4 : 12, u.def.boss ? 8 : 4, u.def.boss ? 14 : 10); }
   mx.strokeStyle = 'rgba(255,255,255,.8)'; mx.lineWidth = 3; mx.strokeRect(renderer.cam * k, 2, renderer.viewW * k, mc.height - 4);
 }
 
@@ -1375,6 +1435,7 @@ function onBattleEnd(win: boolean) {
       const gems = best ? Math.max(0, waves - save.survivalBest) : 0;
       save.gold += gold; save.gems += gems;
       if (best) save.survivalBest = waves;
+      if (best) syncScores();
       track('level_complete', { level: L.index, kind: 'survival', waves });
       persist();
       $(el, 'h2').innerHTML = `${t('survived')} ${num(waves)} ${t('waves')}${best ? `<div style="font-size:20px;color:var(--ok)">${t('newBest')}</div>` : ''}`;
@@ -1400,6 +1461,7 @@ function onBattleEnd(win: boolean) {
   track('level_complete', { level: L.index, stars, seconds: Math.round(b.time), fort_pct: Math.round((b.castleHp[0] / b.castleMax[0]) * 100), revived: b.revived });
   save.gold += gold;
   persist();
+  if (stars > prev) syncScores();
 
   const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result col" style="align-items:center">
     <h2>${t('victory')}</h2>
@@ -1489,7 +1551,7 @@ function onSpecialWin(b: Battle) {
     const n = Number(L.id), first = n > save.tower;
     gold = Math.round(L.reward * (first ? 1 : 0.4));
     gems = first ? (n % 10 === 0 ? 60 : n % 5 === 0 ? 25 : 8) : 0;
-    if (first) save.tower = n;
+    if (first) { save.tower = n; setTimeout(syncScores, 0); }
   } else if (L.kind === 'conquest') {
     const [fid, ks] = L.id!.split('-');
     const k = Number(ks);
@@ -1543,7 +1605,7 @@ applySettings();
 onResize();
 showMenu();
 if (claimSubDaily()) setTimeout(() => toast(`<span class="toast-ico">📅</span><div><b>${t('subDaily')}</b></div>`), 800);
-void initCloud(() => { applySettings(); if (!battle) showMenu(); });
+void initCloud(() => { applySettings(); if (!battle) showMenu(); }).then(syncScores);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();
 });

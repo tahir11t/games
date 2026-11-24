@@ -35,7 +35,7 @@ Desktop keys: `1–9` train units · `Shift`+`1–9` toggle auto-train · `F` ch
 | §7 IAP (remove ads, starter pack, gems) | ⏳ needs Play Billing |
 | §8 Stickman art, gold vs. dark-red armies, no blood (dust/sparks), parallax backgrounds | ✅ procedural canvas art |
 | §8 Oriental music (Hijaz-scale melody + doumbek) and SFX | ✅ synthesized with WebAudio, so no licensing needed |
-| §8 Arabic + English, full RTL | ✅ (v1.0: 8 languages, 3 of them RTL) |
+| §8 Arabic + English, full RTL | ✅ (v1.1: 14 languages, 3 of them RTL) |
 | §9 Offline-first, encrypted local save + cloud backup | ✅ checksummed local save + Supabase |
 | §9 Analytics events (`tutorial_step`, `level_start/complete/fail`, `unit_spawned`, `upgrade_purchased`, `ad_offer_shown/ad_watched`, `session_length`) | ✅ sent to Supabase |
 | §9 Max 40 units per army, landscape, thumb-reachable controls | ✅ |
@@ -263,10 +263,29 @@ Also new:
 
 **Balance:** the bot was re-run on every script. Medium campaign win rate is 86% (87% before, 24 runs per level). Hard with +3 upgrades is 47% (45% before, 20 runs per level). Conquest is unchanged within noise. Last Stand made the Siege and Stampede challenges easier, so their factors in `CH_TUNE` were raised slightly (siege 1.21 → 1.3, stampede 0.27 → 0.28).
 
+## v1.1: going global
+
+- **14 languages.** New in this version: Portuguese (Brazil), Russian, German, Hindi, Simplified Chinese and Japanese, on top of Arabic, English, French, Spanish, Turkish, Indonesian, Persian and Urdu.
+  - Hindi, Chinese and Japanese load Noto Sans Devanagari / SC / JP.
+  - `tn(key, n)` handles word order with a `{n}` placeholder (第 3 天, 3 日目).
+- **Global leaderboard** (🌍 in the menu) with three boards: longest Survival, highest Trials Tower floor and most campaign stars.
+  - Players pick a warrior name and a country flag. Country names come from `Intl.DisplayNames`, so they appear in the player's language, and the device locale picks the starting flag.
+  - The screen shows the top 50 and your own world rank. It works offline-first: scores sync whenever the cloud is reachable.
+  - Table and RLS: `supabase/migrations/20261125000000_global_leaderboard.sql`. Players write only their own rows, scores are capped per board, and a trigger keeps the best score.
+- **Accessibility** (Settings):
+  - Colour-blind mode: the enemy army, health bars, minimap and well banner turn blue instead of red.
+  - Reduce motion: no screen shake, flashes or bouncing. It turns on automatically when the device asks for reduced motion.
+- **Prices** use each language's number and currency style (Play Billing supplies the local currency at release).
+- **Localized Google Play listing** in all 14 languages: `android/fastlane/metadata/android/<locale>/` (title, short and full description, within Play's length limits).
+- Fixes: two animation names added in v1.0 had overridden older ones (star pop-in, rotate icon); they now have their own names.
+
+To turn the leaderboard on in production: enable **anonymous sign-ins** (see below), then apply the v1.1 migration.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.
 - `analytics_events`: insert-only event log. RLS lets users insert only their own events.
+- `leaderboard` (v1.1): one best score per player per board. Anyone can read it; players write only their own rows.
 - Players sign in with **anonymous sign-in** (`signInAnonymously`). **Turn it on in the Supabase dashboard → Authentication → Sign In / Providers → Anonymous sign-ins.** While it's off, the game stays fully playable on the local save.
 - Schema: `supabase/migrations/`.
 
@@ -294,7 +313,8 @@ Enemy waves are generated from a gold **budget** that grows each level, so wave 
 src/
   main.ts          screens, HUD, tutorial, ads/rewards flow
   i18n.ts          Arabic/English strings, language list (LANGS), RTL switching
-  i18n-*.ts        tr, fr, es, id, fa, ur translations
+  i18n-*.ts        tr, fr, es, id, fa, ur, pt, ru, de, hi, zh, ja translations
+  leaderboard.ts   global ranking (Supabase), names, flags
   save.ts          local save, Supabase cloud save + analytics
   data/units.ts    unit stats (PRD §5) and upgrade formulas
   data/levels.ts   40 levels: regions, wave budgets, tuning

@@ -4,8 +4,14 @@ import { ES } from './i18n-es';
 import { ID } from './i18n-id';
 import { FA } from './i18n-fa';
 import { UR } from './i18n-ur';
+import { PT } from './i18n-pt';
+import { RU } from './i18n-ru';
+import { DE } from './i18n-de';
+import { HI } from './i18n-hi';
+import { ZH } from './i18n-zh';
+import { JA } from './i18n-ja';
 
-export type Lang = 'ar' | 'en' | 'tr' | 'fr' | 'es' | 'id' | 'fa' | 'ur';
+export type Lang = 'ar' | 'en' | 'tr' | 'fr' | 'es' | 'id' | 'fa' | 'ur' | 'pt' | 'ru' | 'de' | 'hi' | 'zh' | 'ja';
 /** Every supported language: native name, writing direction and number locale. */
 export const LANGS: { id: Lang; name: string; rtl: boolean; locale: string }[] = [
   { id: 'ar', name: 'العربية', rtl: true, locale: 'ar-EG' },
@@ -16,9 +22,15 @@ export const LANGS: { id: Lang; name: string; rtl: boolean; locale: string }[] =
   { id: 'id', name: 'Bahasa Indonesia', rtl: false, locale: 'id-ID' },
   { id: 'fa', name: 'فارسی', rtl: true, locale: 'fa-IR' },
   { id: 'ur', name: 'اردو', rtl: true, locale: 'ur-PK' },
+  { id: 'pt', name: 'Português', rtl: false, locale: 'pt-BR' },
+  { id: 'ru', name: 'Русский', rtl: false, locale: 'ru-RU' },
+  { id: 'de', name: 'Deutsch', rtl: false, locale: 'de-DE' },
+  { id: 'hi', name: 'हिन्दी', rtl: false, locale: 'hi-IN' },
+  { id: 'zh', name: '简体中文', rtl: false, locale: 'zh-CN' },
+  { id: 'ja', name: '日本語', rtl: false, locale: 'ja-JP' },
 ];
 /** Translations for languages beyond Arabic/English. Missing keys fall back to English. */
-const EXTRA: Partial<Record<Lang, Record<string, string>>> = { tr: TR, fr: FR, es: ES, id: ID, fa: FA, ur: UR };
+const EXTRA: Partial<Record<Lang, Record<string, string>>> = { tr: TR, fr: FR, es: ES, id: ID, fa: FA, ur: UR, pt: PT, ru: RU, de: DE, hi: HI, zh: ZH, ja: JA };
 /** Picks the first supported language from the browser's preferences. */
 export function detectLang(): Lang {
   const prefs = [...(navigator.languages ?? []), navigator.language].filter(Boolean).map((l) => l.toLowerCase());
@@ -502,6 +514,23 @@ const S = {
   st_perfect: { ar: 'ضربات مثالية', en: 'Perfect strikes' },
   st_drops: { ar: 'صناديق مأخوذة', en: 'Crates claimed' },
   st_well: { ar: 'ثوانٍ على البئر', en: 'Seconds at the Well' },
+  // ---- v1.1: global ----
+  leaderboard: { ar: 'الترتيب العالمي', en: 'Global ranking' },
+  lb_survival: { ar: 'أطول نجاة', en: 'Longest survival' },
+  lb_tower: { ar: 'أعلى طابق', en: 'Highest floor' },
+  lb_stars: { ar: 'أكثر النجوم', en: 'Most stars' },
+  you: { ar: 'أنت', en: 'You' },
+  yourRank: { ar: 'ترتيبك العالمي', en: 'Your world rank' },
+  lbOffline: { ar: 'الترتيب العالمي يحتاج اتصالاً بالإنترنت', en: 'The global ranking needs an internet connection' },
+  lbEmpty: { ar: 'لا نتائج بعد. كن الأول!', en: 'No scores yet. Be the first!' },
+  playerName: { ar: 'اسم المحارب', en: 'Warrior name' },
+  country: { ar: 'البلد', en: 'Country' },
+  noCountry: { ar: 'بلا علم', en: 'No flag' },
+  defaultName: { ar: 'محارب', en: 'Warrior' },
+  saveBtn: { ar: 'حفظ', en: 'Save' },
+  accessibility: { ar: 'سهولة الوصول', en: 'Accessibility' },
+  colorblind: { ar: 'ألوان لعمى الألوان', en: 'Colour-blind colours' },
+  calm: { ar: 'تقليل الحركة', en: 'Reduce motion' },
 } as const;
 
 export type Key = keyof typeof S;
@@ -515,8 +544,15 @@ export function setLang(l: Lang) {
   document.documentElement.dir = isRtl() ? 'rtl' : 'ltr';
 }
 export const t = (k: Key): string => (lang === 'ar' || lang === 'en' ? S[k][lang] : EXTRA[lang]?.[k] ?? S[k].en);
+/** A label with a number: uses a "{n}" placeholder when the language needs a different word order (第 3 天, 3 日目). */
+export const tn = (k: Key, n: number): string => { const s = t(k); return s.includes('{n}') ? s.replace('{n}', num(n)) : `${s} ${num(n)}`; };
 export const tk = (k: string): string => (k in S ? t(k as Key) : k);
 const fmt = new Map<string, Intl.NumberFormat>();
+/** A USD store price in the player's number style (Play Billing supplies local currency at release). */
+export const price = (usd: number) => {
+  const loc = LANGS.find((x) => x.id === lang)?.locale ?? 'en-US';
+  try { return new Intl.NumberFormat(loc, { style: 'currency', currency: 'USD' }).format(usd); } catch { return '$' + usd.toFixed(2); }
+};
 export const num = (n: number) => {
   const loc = LANGS.find((x) => x.id === lang)?.locale ?? 'en-US';
   let f = fmt.get(loc);

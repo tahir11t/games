@@ -6,6 +6,8 @@ import { UNITS, type EnemyId } from '../data/units';
 
 const INK = '#16120e';
 let TEAM = ['#e0a82e', '#9e1f1f'];
+/** Accessibility: blue enemy colour for colour-blind players, no shake/flashes for motion-sensitive ones. */
+export const a11y = { colorblind: false, calm: false };
 
 interface Theme { sky: [string, string, string]; far: string; mid: string; ground: [string, string]; grass?: string; sun: string; haze: string; night?: boolean }
 const THEMES: Record<RegionId, Theme> = {
@@ -62,7 +64,7 @@ export class Renderer {
     const th = THEMES[b.level.region];
     const time = (performance.now() - this.t0) / 1000;
     const low = isLowQuality();
-    TEAM = ['#e0a82e', b.level.enemyColor ?? '#9e1f1f'];
+    TEAM = ['#e0a82e', a11y.colorblind ? '#2f6fd6' : b.level.enemyColor ?? '#9e1f1f'];
     c.direction = 'ltr'; // numbers like "-20" must not flip on RTL pages
     c.setTransform(1, 0, 0, 1, 0, 0);
     const sk = c.createLinearGradient(0, 0, 0, this.canvas.height * 0.75);
@@ -70,8 +72,8 @@ export class Renderer {
     c.fillStyle = sk;
     c.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    const shx = b.shake > 0 ? (Math.random() - 0.5) * b.shake * 14 : 0;
-    const shy = b.shake > 0 ? (Math.random() - 0.5) * b.shake * 8 : 0;
+    const shx = b.shake > 0 && !a11y.calm ? (Math.random() - 0.5) * b.shake * 14 : 0;
+    const shy = b.shake > 0 && !a11y.calm ? (Math.random() - 0.5) * b.shake * 8 : 0;
     c.setTransform(this.scale, 0, 0, this.scale, shx * this.scale, shy * this.scale);
     if (b.over && b.finale > 0) { // victory slow-motion: gentle push-in on the fallen fort
       const z = 1 + 0.18 * Math.min(1, (1.6 - b.finale) / 0.8);
@@ -201,9 +203,9 @@ export class Renderer {
     }
     if (!low) this.weather(b.level.region, time);
     if (th.night) { c.fillStyle = 'rgba(20,16,50,.16)'; c.fillRect(0, 0, this.viewW, H); }
-    if (b.abilityFx > 0) { c.fillStyle = `rgba(255,220,120,${b.abilityFx * 0.15})`; c.fillRect(0, 0, this.viewW, H); }
-    if (b.buff > 0) { c.fillStyle = `rgba(255,120,40,${0.05 + Math.sin(time * 8) * 0.02})`; c.fillRect(0, 0, this.viewW, H); }
-    if (b.rage && !b.over) { const pr = 0.12 + Math.sin(time * 6) * 0.05; const rg = c.createRadialGradient(this.viewW / 2, H / 2, H * 0.35, this.viewW / 2, H / 2, this.viewW * 0.7); rg.addColorStop(0, 'rgba(200,0,0,0)'); rg.addColorStop(1, `rgba(200,20,10,${pr})`); c.fillStyle = rg; c.fillRect(0, 0, this.viewW, H); }
+    if (b.abilityFx > 0 && !a11y.calm) { c.fillStyle = `rgba(255,220,120,${b.abilityFx * 0.15})`; c.fillRect(0, 0, this.viewW, H); }
+    if (b.buff > 0 && !a11y.calm) { c.fillStyle = `rgba(255,120,40,${0.05 + Math.sin(time * 8) * 0.02})`; c.fillRect(0, 0, this.viewW, H); }
+    if (b.rage && !b.over) { const pr = a11y.calm ? 0.12 : 0.12 + Math.sin(time * 6) * 0.05; const rg = c.createRadialGradient(this.viewW / 2, H / 2, H * 0.35, this.viewW / 2, H / 2, this.viewW * 0.7); rg.addColorStop(0, 'rgba(200,0,0,0)'); rg.addColorStop(1, `rgba(200,20,10,${pr})`); c.fillStyle = rg; c.fillRect(0, 0, this.viewW, H); }
     if (low) return;
     const vg = c.createRadialGradient(this.viewW / 2, H * 0.55, H * 0.45, this.viewW / 2, H * 0.55, Math.max(this.viewW, H) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(20,10,0,.28)');
@@ -669,7 +671,7 @@ export class Renderer {
     c.save();
     c.setLineDash([6, 6]); c.strokeStyle = 'rgba(255,255,255,.28)'; c.lineWidth = 2; c.beginPath(); c.ellipse(x, G + 4, WELL_R, WELL_R * 0.16, 0, 0, 7); c.stroke(); c.setLineDash([]);
     if (Math.abs(w.progress) > 0.01) {
-      const col = w.progress > 0 ? '#ffd34d' : (b.level.enemyColor ?? '#ff5a4a');
+      const col = w.progress > 0 ? '#ffd34d' : TEAM[1];
       c.strokeStyle = col; c.globalAlpha = 0.85; c.lineWidth = 4;
       c.beginPath(); c.ellipse(x, G + 4, WELL_R, WELL_R * 0.16, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(w.progress)); c.stroke();
     }
@@ -694,7 +696,7 @@ export class Renderer {
     c.strokeStyle = '#3a2a1a'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, G - 64); c.lineTo(x, by); c.stroke();
     c.fillStyle = '#7a5530'; c.beginPath(); c.roundRect(x - 5, by, 10, 9, 2); c.fill();
     // owner banner
-    const col = w.owner === 0 ? '#ffd34d' : w.owner === 1 ? (b.level.enemyColor ?? '#c8323c') : '#e8e0d0';
+    const col = w.owner === 0 ? '#ffd34d' : w.owner === 1 ? TEAM[1] : '#e8e0d0';
     c.strokeStyle = '#3a2a1a'; c.lineWidth = 2.5; c.beginPath(); c.moveTo(x, G - 88); c.lineTo(x, G - 122); c.stroke();
     c.fillStyle = col; c.beginPath(); c.moveTo(x, G - 122); c.quadraticCurveTo(x + 14, G - 120 + Math.sin(time * 5) * 2, x + 28 + Math.sin(time * 4) * 3, G - 116); c.lineTo(x, G - 106); c.closePath(); c.fill(); c.strokeStyle = 'rgba(0,0,0,.4)'; c.lineWidth = 1; c.stroke();
     if (w.owner !== -1 && !isLowQuality()) glowDot(c, x, G - 30, 4 + Math.sin(time * 4), w.owner === 0 ? '#7dff9a' : '#ff9a7d');
@@ -804,7 +806,7 @@ export class Renderer {
       const y = gy - u.def.height * (1 + (u.tier ?? 0) * 0.035) - 14;
       const pct = Math.max(0, u.hp) / u.maxHp;
       c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(u.x - w / 2 - 1, y - 1, w + 2, 6);
-      c.fillStyle = u.side === 0 ? (pct > 0.35 ? '#5cc85c' : '#e8b730') : '#e0453a'; c.fillRect(u.x - w / 2, y, w * pct, 4);
+      c.fillStyle = u.side === 0 ? (pct > 0.35 ? '#5cc85c' : '#e8b730') : a11y.colorblind ? '#4d8fff' : '#e0453a'; c.fillRect(u.x - w / 2, y, w * pct, 4);
       c.font = '800 10px system-ui, sans-serif'; c.textAlign = 'center';
       // number when hurt (and always for bosses / the unit you control) to keep crowds readable
       if (u.hp < u.maxHp - 0.5 || u.def.boss || u === this.lastControlled) {
@@ -820,6 +822,6 @@ export class Renderer {
     const w = u.def.boss ? 100 : 32;
     const y = gy - u.def.height - 14;
     c.fillStyle = 'rgba(0,0,0,.5)'; c.fillRect(u.x - w / 2 - 1, y - 1, w + 2, 7);
-    c.fillStyle = u.side === 0 ? '#5cc85c' : '#e0453a'; c.fillRect(u.x - w / 2, y, (w * Math.max(0, u.hp)) / u.maxHp, 5);
+    c.fillStyle = u.side === 0 ? '#5cc85c' : a11y.colorblind ? '#4d8fff' : '#e0453a'; c.fillRect(u.x - w / 2, y, (w * Math.max(0, u.hp)) / u.maxHp, 5);
   }
 }

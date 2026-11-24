@@ -45,6 +45,8 @@ export interface SaveData {
   dailyDone: string | null;
   seen: string[]; // enemy types met in battle (Codex discovery)
   vibrate: boolean;
+  profile: { name: string; country: string | null; tag: string }; // shown on the global leaderboard (tag: default-name suffix)
+  a11y: { colorblind: boolean; calm: boolean };
   updatedAt: number;
 }
 
@@ -53,9 +55,16 @@ const KEY = 'sandwars.save.v1';
 /** Fill in fields added after a save was written (shallow + nested maps). */
 export function migrate(raw: Partial<SaveData>): SaveData {
   const d = defaultSave();
-  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub } };
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub }, profile: { ...d.profile, ...raw.profile }, a11y: { ...d.a11y, ...raw.a11y } };
 }
 const today = () => new Date().toISOString().slice(0, 10);
+/** The device's country from its locale (e.g. ar-SA → SA), if it names one. */
+export function localeCountry(): string | null {
+  for (const l of [...(navigator.languages ?? []), navigator.language]) {
+    try { const r = new Intl.Locale(l).maximize().region; if (r && /^[A-Z]{2}$/.test(r)) return r; } catch { /* bad tag */ }
+  }
+  return null;
+}
 
 export function defaultSave(): SaveData {
   return {
@@ -99,6 +108,8 @@ export function defaultSave(): SaveData {
     dailyDone: null,
     seen: [],
     vibrate: true,
+    profile: { name: '', country: localeCountry(), tag: String(1000 + Math.floor(Math.random() * 9000)) },
+    a11y: { colorblind: false, calm: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches },
     updatedAt: Date.now(),
   };
 }
@@ -155,6 +166,7 @@ const KEY_PUB = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefi
 export const sb: SupabaseClient | null = URL && KEY_PUB ? createClient(URL, KEY_PUB) : null;
 export let cloudOnline = false;
 let userId: string | null = null;
+export const currentUser = () => userId;
 const sessionId = Math.random().toString(36).slice(2);
 
 export async function initCloud(onMerged: () => void) {
@@ -202,7 +214,7 @@ export function track(name: string, params: Record<string, unknown> = {}) {
 export async function flushEvents() {
   if (!sb || !userId || !queue.length) return;
   const batch = queue.splice(0, queue.length).map((e) => ({
-    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.0.0', locale: save.lang,
+    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.1.0', locale: save.lang,
   }));
   const { error } = await sb.from('analytics_events').insert(batch);
   if (error) console.warn('[analytics] flush failed', error.message);

@@ -8,8 +8,14 @@ import { ES } from '../src/i18n-es';
 import { ID } from '../src/i18n-id';
 import { FA } from '../src/i18n-fa';
 import { UR } from '../src/i18n-ur';
+import { PT } from '../src/i18n-pt';
+import { RU } from '../src/i18n-ru';
+import { DE } from '../src/i18n-de';
+import { HI } from '../src/i18n-hi';
+import { ZH } from '../src/i18n-zh';
+import { JA } from '../src/i18n-ja';
 
-const files: Record<string, Record<string, string>> = { tr: TR, fr: FR, es: ES, id: ID, fa: FA, ur: UR };
+const files: Record<string, Record<string, string>> = { tr: TR, fr: FR, es: ES, id: ID, fa: FA, ur: UR, pt: PT, ru: RU, de: DE, hi: HI, zh: ZH, ja: JA };
 const keep = /[↻★✓⚔×]/g; // symbols the UI relies on
 let bad = 0;
 for (const [lang, dict] of Object.entries(files)) {
