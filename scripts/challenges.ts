@@ -7,7 +7,7 @@ import { CHALLENGES, challengeLevel } from '../src/data/challenges';
 import { UNITS, type UnitId } from '../src/data/units';
 import { expectedUpgrade } from './balance';
 
-const earned: Record<string, UnitId[]> = { hyenas: ['lion'], scorpion: ['assassin'], roc: ['falcon'], titan: ['giant'], djinn: ['genie'], warlord: ['hero'] };
+const earned: Record<string, UnitId[]> = { hyenas: ['lion'], siege: ['drummer'], scorpion: ['assassin'], roc: ['falcon'], titan: ['giant'], stampede: ['elephant'], djinn: ['genie'], warlord: ['hero'] };
 
 function play(ci: number, upgBonus: number, tune?: number) {
   const c = CHALLENGES[ci];
@@ -28,15 +28,16 @@ function play(ci: number, upgBonus: number, tune?: number) {
     const army = b.playerArmy.filter((u) => u.def.id !== 'miner');
     if (b.minerCount() < 6 && b.canTrain('miner') && (army.length >= 2 || b.minerCount() < 3)) { b.train('miner'); continue; }
     const enemies = b.units.filter((u) => u.side === 1 && !u.dead);
-    const flyers = enemies.some((e) => e.def.flying) || ['roc', 'djinn', 'warlord'].includes(c.id);
-    const comp = (['sword', 'archer', 'spear', 'camel', 'catapult', 'healer', 'falcon', 'fire', 'lion', 'assassin', 'giant', 'genie', 'hero'] as UnitId[]).filter(avail);
+    const flyers = enemies.some((e) => e.def.flying) || ['roc', 'djinn', 'warlord', 'phoenix'].includes(c.id);
+    const comp = (['sword', 'archer', 'spear', 'camel', 'cavalry', 'crossbow', 'catapult', 'healer', 'drummer', 'falcon', 'fire', 'lion', 'assassin', 'giant', 'elephant', 'genie', 'hero'] as UnitId[]).filter(avail);
     // Like a real player: answer flyers with ranged / flying units.
     const air = comp.filter((id) => (UNITS[id].ranged && id !== 'catapult') || UNITS[id].flying || UNITS[id].heal);
     const flyerShare = enemies.length ? enemies.filter((e) => e.def.flying).length / enemies.length : 0;
     const pool = flyers && air.length && Math.random() < 0.4 + flyerShare * 0.5 ? air : comp;
     const pick = pool[Math.floor(Math.random() * pool.length)];
     if (pick && b.queue.length < 2) b.train(pick);
-    if (army.length >= 12 && b.mode !== 'attack') b.setMode('attack');
+    if (c.winAfter) b.setMode('defend');
+    else if (army.length >= 12 && b.mode !== 'attack') b.setMode('attack');
     else if (army.length < 5 && b.mode === 'attack') b.setMode('defend');
     if (b.ability >= 1 && enemies.length >= 3) b.useAbility();
   }
@@ -47,7 +48,7 @@ if (process.argv.includes('--tune')) {
   // Find the strength factor giving ~50% wins at +2 upgrade levels.
   const out: string[] = [];
   for (let i = 0; i < CHALLENGES.length; i++) {
-    let lo = 0.2, hi = 2;
+    let lo = 0.15, hi = 1.6;
     for (let step = 0; step < 8; step++) { const mid = (lo + hi) / 2; if (rate(i, 2, mid) >= 0.5) lo = mid; else hi = mid; }
     out.push(`${CHALLENGES[i].id}: ${Math.round(lo * 100) / 100}`);
     console.log(out[out.length - 1]);

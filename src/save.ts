@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { UnitId } from './data/units';
+import { PLAYER_UNITS, type UnitId } from './data/units';
+import type { Difficulty } from './game/battle';
 import type { AbilityId, PassiveId, ChallengeId } from './data/skills';
 import type { Lang } from './i18n';
 
@@ -25,6 +26,10 @@ export interface SaveData {
   ability: AbilityId;
   passives: Record<PassiveId, number>;
   survivalBest: number;
+  difficulty: Difficulty;
+  music: string; // track id or 'auto'
+  musicOn: boolean;
+  speed: 1 | 2;
   dailyDone: string | null;
   updatedAt: number;
 }
@@ -41,13 +46,13 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function defaultSave(): SaveData {
   return {
     v: 1,
-    lang: navigator.language?.startsWith('ar') ? 'ar' : 'en',
+    lang: navigator.language?.startsWith('ar') ? 'ar' : navigator.language?.startsWith('tr') ? 'tr' : 'en',
     sound: true,
     gold: 0,
     gems: 0,
     stars: {},
     unlocked: 1,
-    unitLevels: { miner: 1, sword: 1, archer: 1, spear: 1, camel: 1, catapult: 1, healer: 1, falcon: 1, fire: 1, lion: 1, assassin: 1, giant: 1, genie: 1, hero: 1 },
+    unitLevels: Object.fromEntries(PLAYER_UNITS.map((id) => [id, 1])) as Record<UnitId, number>,
     daily: { day: 0, lastClaim: null },
     chestAt: Date.now(),
     chestAdsToday: 0,
@@ -59,7 +64,11 @@ export function defaultSave(): SaveData {
     trophies: {},
     abilities: ['volley'],
     ability: 'volley',
-    passives: { mining: 0, walls: 0, treasury: 0, eagle: 0, wisdom: 0 },
+    passives: { mining: 0, walls: 0, treasury: 0, eagle: 0, wisdom: 0, towers: 0 },
+    difficulty: 'medium',
+    music: 'auto',
+    musicOn: true,
+    speed: 1,
     survivalBest: 0,
     dailyDone: null,
     updatedAt: Date.now(),

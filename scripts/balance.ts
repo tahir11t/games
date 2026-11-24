@@ -8,7 +8,7 @@ export function play(levelIdx: number, upg: number, skill: number, level?: Level
   const L = level ?? LEVELS[levelIdx - 1];
   let result: boolean | null = null;
   const lv = { miner: 1, sword: upg, archer: upg, spear: upg, camel: upg, catapult: upg } as Record<UnitId, number>;
-  const b = new Battle(L, lv, 150, { onEnd: (w) => (result = w), onUnitTrained: () => {} });
+  const b = new Battle(L, { unitLevels: lv, difficulty: (process.env.DIFF ?? 'medium') as 'easy' | 'medium' | 'hard' }, 150, { onEnd: (w) => (result = w), onUnitTrained: () => {} });
   const avail = (id: UnitId) => UNITS[id].unlock <= levelIdx;
   const dt = 1 / 30;
   let think = 0;
@@ -25,6 +25,8 @@ export function play(levelIdx: number, upg: number, skill: number, level?: Level
     if (avail('archer')) comp.push('archer', 'sword');
     if (avail('spear')) comp.push('spear');
     if (avail('camel') && enemies.some((e) => e.def.ranged)) comp.push('camel');
+    if (avail('cavalry')) comp.push('cavalry');
+    if (avail('crossbow')) comp.push('crossbow');
     if (avail('catapult') && army.length > 6) comp.push('catapult');
     const pick = comp[Math.floor(Math.random() * comp.length)];
     if (b.queue.length < 2) b.train(pick);
@@ -37,12 +39,12 @@ export function play(levelIdx: number, upg: number, skill: number, level?: Level
   return { win: result === true, time: b.time, stars: b.stars(result === true) };
 }
 
-export const expectedUpgrade = (i: number) => Math.min(16, 1 + Math.floor((i - 1) / 2.6));
+export const expectedUpgrade = (i: number) => Math.min(18, 1 + Math.floor((i - 1) / 2.6));
 if (process.argv[1]?.endsWith('balance.ts')) {
 const rows: string[] = [];
-const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 40);
+const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 50);
 for (let i = FROM; i <= TO; i++) {
-  const upg = expectedUpgrade(i);
+  const upg = Math.min(20, expectedUpgrade(i) + Number(process.env.UPG_BONUS ?? 0));
   let wins = 0, t = 0, st = 0;
   const N = 8;
   for (let k = 0; k < N; k++) { const r = play(i, upg, 1); if (r.win) { wins++; t += r.time; st += r.stars; } }

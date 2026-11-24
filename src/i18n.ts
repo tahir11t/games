@@ -1,4 +1,6 @@
-export type Lang = 'ar' | 'en';
+import { TR } from './i18n-tr';
+
+export type Lang = 'ar' | 'en' | 'tr';
 
 const S = {
   title: { ar: 'حرب الرمال', en: 'Sand Wars' },
@@ -86,7 +88,7 @@ const S = {
   challenges: { ar: 'تحديات الوحوش', en: 'Monster Challenges' },
   survival: { ar: 'النجاة', en: 'Survival' },
   dailyCh: { ar: 'تحدي اليوم', en: 'Daily Challenge' },
-  campaignDesc: { ar: '40 مستوى في 4 مناطق', en: '40 levels across 4 regions' },
+  campaignDesc: { ar: '50 مستوى في 5 مناطق', en: '50 levels across 5 regions' },
   challengesDesc: { ar: 'اهزم وحوشاً قوية لتفتح أقوى الجنود والمهارات', en: 'Beat mighty monsters to unlock elite units and skills' },
   survivalDesc: { ar: 'موجات لا تنتهي — كم ستصمد؟', en: 'Endless waves — how long can you hold?' },
   dailyDesc: { ar: 'قاعدة خاصة كل يوم', en: 'A special rule every day' },
@@ -170,6 +172,52 @@ const S = {
   d_beasts: { ar: 'هجوم الضباع', en: 'Hyena raids' },
   d_sky: { ar: 'سماء النسور', en: 'Vulture skies' },
   d_melee: { ar: 'قتال قريب فقط', en: 'Melee only' },
+
+  // --- v0.3 ---
+  r_tombs: { ar: 'المقابر المنسية', en: 'Forgotten Tombs' },
+  b_tombs: { ar: 'ملك المومياوات', en: 'Mummy King' },
+  u_cavalry: { ar: 'فارس الخيل', en: 'Horse Knight' },
+  u_crossbow: { ar: 'رامي القوس الثقيل', en: 'Crossbowman' },
+  u_drummer: { ar: 'طبّال الحرب', en: 'War Drummer' },
+  u_elephant: { ar: 'فيل الحرب', en: 'War Elephant' },
+  ud_drummer: { ar: 'يرفع ضرر وسرعة من حوله 15%', en: '+15% damage and speed to nearby allies' },
+  ud_elephant: { ar: 'دبابة هائلة تدهس المجموعات', en: 'Massive tank that tramples groups' },
+  ch_siege: { ar: 'الحصار', en: 'The Siege' },
+  ch_stampede: { ar: 'التدافع الكبير', en: 'The Stampede' },
+  ch_cobra: { ar: 'ملكة الأفاعي', en: 'Cobra Queen' },
+  ch_phoenix: { ar: 'العنقاء', en: 'The Phoenix' },
+  a_reinforce: { ar: 'نجدة الحرس', en: 'Reinforcements' },
+  a_inferno: { ar: 'جحيم العنقاء', en: 'Phoenix Inferno' },
+  ad_reinforce: { ar: 'يستدعي 4 جنود مخضرمين فوراً', en: 'Summons 4 veteran soldiers instantly' },
+  ad_inferno: { ar: 'مطر من النار على خط العدو', en: 'A rain of fire along the enemy line' },
+  p_towers: { ar: 'رماة الأبراج', en: 'Tower Archers' },
+  pd_towers: { ar: '+45% ضرر رامي البرج لكل مستوى', en: '+45% tower archer damage per level' },
+  difficulty: { ar: 'الصعوبة', en: 'Difficulty' },
+  d_easy: { ar: 'سهل', en: 'Easy' },
+  d_medium: { ar: 'متوسط', en: 'Medium' },
+  d_hard: { ar: 'صعب', en: 'Hard' },
+  dd_easy: { ar: 'عدو بسيط يختار جنوده عشوائياً · ذهب ×0.8', en: 'Simple enemy, random units · gold ×0.8' },
+  dd_medium: { ar: 'عدو يبني جنوداً مضادة لجيشك', en: 'Enemy builds counters to your army' },
+  dd_hard: { ar: 'عدو ذكي: يدّخر وينسحب ويغير على عمّالك · ذهب ×1.5', en: 'Smart enemy: saves, retreats, raids your miners · gold ×1.5' },
+  music: { ar: 'الموسيقى', en: 'Music' },
+  auto: { ar: 'تلقائي', en: 'Auto' },
+  t_caravan: { ar: 'قافلة الصحراء', en: 'Desert Caravan' },
+  t_oasis: { ar: 'فجر الواحة', en: 'Oasis Dawn' },
+  t_drums: { ar: 'طبول الحرب', en: 'War Drums' },
+  t_djinn: { ar: 'ليلة المارد', en: 'Night of the Djinn' },
+  t_dabke: { ar: 'رقصة البادية', en: 'Bedouin Dance' },
+  sfx: { ar: 'المؤثرات', en: 'Effects' },
+  stats: { ar: 'إحصاءات المعركة', en: 'Battle stats' },
+  st_kills: { ar: 'قتلى العدو', en: 'Enemies defeated' },
+  st_lost: { ar: 'خسائرك', en: 'Your losses' },
+  st_trained: { ar: 'جنود دُرّبوا', en: 'Units trained' },
+  st_mined: { ar: 'ذهب مُستخرج', en: 'Gold mined' },
+  st_minersKilled: { ar: 'عمّال عدو أُسقطوا', en: 'Enemy miners stopped' },
+  mvp: { ar: 'نجم المعركة', en: 'MVP' },
+  surviveFor: { ar: 'اصمد', en: 'Survive' },
+  seconds: { ar: 'ثانية', en: 'sec' },
+  enemyAi: { ar: 'ذكاء الخصم', en: 'Enemy AI' },
+  veteran: { ar: 'ترقية ميدانية!', en: 'Field promotion!' },
 } as const;
 
 export type Key = keyof typeof S;
@@ -181,6 +229,6 @@ export function setLang(l: Lang) {
   document.documentElement.lang = l;
   document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
 }
-export const t = (k: Key) => S[k][lang];
-export const tk = (k: string) => (S as Record<string, Record<Lang, string>>)[k]?.[lang] ?? k;
-export const num = (n: number) => (lang === 'ar' ? n.toLocaleString('ar-EG') : n.toLocaleString('en-US'));
+export const t = (k: Key): string => (lang === 'tr' ? TR[k] ?? S[k].en : S[k][lang]);
+export const tk = (k: string): string => (k in S ? t(k as Key) : k);
+export const num = (n: number) => n.toLocaleString(lang === 'ar' ? 'ar-EG' : lang === 'tr' ? 'tr-TR' : 'en-US');

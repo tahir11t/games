@@ -3,10 +3,12 @@
 // (re-run scripts/tune.ts afterwards).
 export type UnitId =
   | 'miner' | 'sword' | 'archer' | 'spear' | 'camel' | 'catapult'
-  | 'healer' | 'falcon' | 'fire' | 'lion' | 'assassin' | 'giant' | 'genie' | 'hero';
+  | 'healer' | 'falcon' | 'fire' | 'lion' | 'assassin' | 'giant' | 'genie' | 'hero'
+  | 'cavalry' | 'crossbow' | 'drummer' | 'elephant';
 export type EnemyId = UnitId
   | 'bandit' | 'sandmage' | 'golem' | 'ghost' | 'boss'
-  | 'hyena' | 'vulture' | 'scorpking' | 'roc' | 'worm' | 'titan' | 'djinn' | 'warlord';
+  | 'hyena' | 'vulture' | 'scorpking' | 'roc' | 'worm' | 'titan' | 'djinn' | 'warlord'
+  | 'mummy' | 'skeleton' | 'cobra' | 'mummyking' | 'cobraqueen' | 'phoenix';
 
 export interface UnitDef {
   id: EnemyId;
@@ -27,6 +29,7 @@ export interface UnitDef {
   crit?: number; // chance of x2.5 damage
   dodge?: number; // chance to ignore a single-target hit
   aura?: number; // +x damage to allies within 140px
+  support?: boolean; // stays behind the line and doesn't attack (drummer)
   maxCount?: number; // max alive at once
   boss?: boolean;
   height: number;
@@ -63,12 +66,24 @@ export const UNITS: Record<EnemyId, UnitDef> = {
   worm:     { id: 'worm',     cost: 0, train: 0, hp: 4200, dmg: 48, range: 70, speed: 26, cooldown: 2.0, unlock: 99, height: 110, splash: 60, boss: true },
   titan:    { id: 'titan',    cost: 0, train: 0, hp: 5200, dmg: 55, range: 60, speed: 22, cooldown: 2.2, unlock: 99, height: 140, splash: 55, boss: true },
   djinn:    { id: 'djinn',    cost: 0, train: 0, hp: 3600, dmg: 40, range: 210, speed: 40, cooldown: 2.0, unlock: 99, height: 110, flying: true, ranged: true, splash: 60, boss: true },
+  // --- v0.3 player units ---
+  cavalry:  { id: 'cavalry',  cost: 350, train: 7,  hp: 320, dmg: 24, range: 32,  speed: 125, cooldown: 0.9, unlock: 26, height: 78, charge: true, bonusVs: ['archer', 'catapult', 'crossbow', 'sandmage'] },
+  crossbow: { id: 'crossbow', cost: 280, train: 6,  hp: 110, dmg: 34, range: 280, speed: 46, cooldown: 2.2, unlock: 34, height: 56, ranged: true, bonusVs: ['giant', 'golem', 'elephant', 'titan', 'mummy', 'spear'] },
+  drummer:  { id: 'drummer',  cost: 220, train: 5,  hp: 130, dmg: 0,  range: 160, speed: 50, cooldown: 1.0, unlock: 99, height: 55, aura: 0.15, support: true },
+  elephant: { id: 'elephant', cost: 850, train: 14, hp: 2300, dmg: 44, range: 46, speed: 30, cooldown: 1.8, unlock: 99, height: 105, splash: 52, charge: true },
+  // --- v0.3 monsters ---
+  mummy:    { id: 'mummy',    cost: 0, train: 0, hp: 280, dmg: 16, range: 28,  speed: 36, cooldown: 1.1, unlock: 99, height: 58 },
+  skeleton: { id: 'skeleton', cost: 0, train: 0, hp: 95,  dmg: 13, range: 26,  speed: 72, cooldown: 0.8, unlock: 99, height: 55 },
+  cobra:    { id: 'cobra',    cost: 0, train: 0, hp: 130, dmg: 18, range: 30,  speed: 100, cooldown: 0.7, unlock: 99, height: 40, crit: 0.2 },
+  mummyking:{ id: 'mummyking',cost: 0, train: 0, hp: 3600, dmg: 38, range: 55, speed: 30, cooldown: 1.5, unlock: 99, height: 118, splash: 48, aura: 0.2, boss: true },
+  cobraqueen:{ id: 'cobraqueen', cost: 0, train: 0, hp: 3200, dmg: 40, range: 60, speed: 58, cooldown: 1.0, unlock: 99, height: 90, splash: 40, crit: 0.25, boss: true },
+  phoenix:  { id: 'phoenix',  cost: 0, train: 0, hp: 3400, dmg: 38, range: 200, speed: 70, cooldown: 1.7, unlock: 99, height: 90, flying: true, ranged: true, splash: 58, boss: true },
   warlord:  { id: 'warlord',  cost: 0, train: 0, hp: 6500, dmg: 60, range: 55, speed: 34, cooldown: 1.3, unlock: 99, height: 120, splash: 45, aura: 0.2, boss: true },
 };
 
 /** Order of the unit bar. */
-export const PLAYER_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'catapult', 'healer', 'falcon', 'fire', 'lion', 'assassin', 'giant', 'genie', 'hero'];
-export const BASE_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'catapult'];
+export const PLAYER_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'cavalry', 'crossbow', 'catapult', 'healer', 'drummer', 'falcon', 'fire', 'lion', 'assassin', 'giant', 'elephant', 'genie', 'hero'];
+export const BASE_UNITS: UnitId[] = ['miner', 'sword', 'archer', 'spear', 'camel', 'cavalry', 'crossbow', 'catapult'];
 
 export const MINER_GOLD = 5;
 export const MINER_INTERVAL = 3;
@@ -77,6 +92,7 @@ export const MAX_ARMY = 40;
 export const CONTROL_BONUS = 1.3;
 export const COUNTER_BONUS = 1.75;
 export const FLY_HEIGHT = 95;
+export const MAX_RANK = 2; // veteran ranks earned from kills
 
 /** +8% hp/dmg per upgrade level (PRD 6). */
 export const upgradeMult = (lvl: number) => 1 + 0.08 * (lvl - 1);

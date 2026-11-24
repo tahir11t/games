@@ -7,7 +7,9 @@ import { ABILITIES, PASSIVES, PASSIVE_MAX, UNIT_SHOP, type AbilityId, type Passi
 import { CHALLENGES, challengeById, challengeLevel, dailyFor, survivalLevel, type ChallengeDef } from './data/challenges';
 import { Battle, W } from './game/battle';
 import { Renderer } from './game/render';
-import { sfx, setSound, startMusic, stopMusic, unlockAudio } from './game/audio';
+import { sfx, setSound, setMusicOn, startMusic, stopMusic, unlockAudio, playTrack, TRACKS } from './game/audio';
+import { DIFFICULTY, type Difficulty } from './game/battle';
+import { LEVEL_COUNT } from './data/levels';
 
 const ui = document.getElementById('ui')!;
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
@@ -34,13 +36,21 @@ function reqHtml(r: Requirement) {
   if (r.challenge && !(save.trophies[r.challenge] ?? 0)) return `🔒 ${t('needChallenge')} «${tk('ch_' + r.challenge)}»`;
   return '';
 }
-function perks(): Perks { return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives }; }
+function perks(): Perks & { difficulty: Difficulty } { return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives, difficulty: save.difficulty }; }
+const diffIcon: Record<Difficulty, string> = { easy: '🟢', medium: '🟡', hard: '🔴' };
+function diffPicker() {
+  return `<div class="diff-row">${(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => `<button class="diff ${save.difficulty === d ? 'on' : ''}" data-diff="${d}">${diffIcon[d]} ${t(('d_' + d) as Key)}</button>`).join('')}</div><div class="diff-desc">🧠 ${t(('dd_' + save.difficulty) as Key)}</div>`;
+}
+function bindDiff(el: HTMLElement, redraw: () => void) {
+  el.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { save.difficulty = b.dataset.diff as Difficulty; sfx('click'); persist(); redraw(); }));
+}
 const unlockName = (k: string) => (k in UNITS ? tk('u_' + k) : k in ABILITIES ? tk('a_' + k) : tk('p_' + k));
 const unlockIcon = (k: string) => (k in UNITS ? `<img src="${icons[k as UnitId]}" style="width:40px;height:40px;vertical-align:middle">` : k in ABILITIES ? ABILITIES[k as AbilityId].icon : PASSIVES[k as PassiveId].icon);
 
 function applySettings() {
   setLang(save.lang);
   setSound(save.sound);
+  setMusicOn(save.musicOn);
   document.querySelectorAll<HTMLElement>('[data-t]').forEach((el) => (el.textContent = t(el.dataset.t as Key)));
 }
 
@@ -91,7 +101,7 @@ function showAd(kind: 'rewarded' | 'interstitial', placement: string): Promise<b
 // ---------------- Menu ----------------
 function showMenu() {
   stopBattleLoop();
-  startMusic('menu');
+  startMusic('menu', save.music);
   const el = h(`<div class="screen">
     ${topbar(false)}
     <div class="menu-main">
@@ -268,22 +278,33 @@ function showRewards() {
 
 // ---------------- Settings ----------------
 function showSettings() {
+  const langs: [string, string][] = [['ar', 'العربية'], ['en', 'English'], ['tr', 'Türkçe']];
   const el = h(`<div class="screen">
     ${topbar()}
-    <div class="grow" style="display:flex;align-items:center;justify-content:center">
-      <div class="panel col" style="min-width:320px">
-        <div class="row"><b class="grow">${t('language')}</b>
-          <button class="btn small ${save.lang === 'ar' ? '' : 'secondary'}" data-lang="ar">العربية</button>
-          <button class="btn small ${save.lang === 'en' ? '' : 'secondary'}" data-lang="en">English</button></div>
-        <div class="row"><b class="grow">${t('sound')}</b>
-          <button class="btn small" data-a="sound">${save.sound ? t('on') : t('off')}</button></div>
+    <div class="grow settings-wrap">
+      <div class="panel col settings">
+        <div class="row"><b class="grow">${t('language')}</b>${langs.map(([k, n]) => `<button class="btn small ${save.lang === k ? '' : 'secondary'}" data-lang="${k}">${n}</button>`).join('')}</div>
+        <div class="row"><b class="grow">${t('difficulty')}</b></div>
+        ${diffPicker()}
+        <div class="row"><b class="grow">🎵 ${t('music')}</b><button class="btn small ${save.musicOn ? '' : 'secondary'}" data-a="music">${save.musicOn ? t('on') : t('off')}</button>
+          <b>🔊 ${t('sfx')}</b><button class="btn small ${save.sound ? '' : 'secondary'}" data-a="sound">${save.sound ? t('on') : t('off')}</button></div>
+        <div class="tracks">${['auto', ...TRACKS.map((x) => x.id)].map((id) => `<button class="track ${save.music === id ? 'on' : ''}" data-track="${id}">${id === 'auto' ? '✨ ' + t('auto') : '🎶 ' + tk('t_' + id)}</button>`).join('')}</div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v0.1.0 · prototype</div>
+        <div style="font-size:12px;color:var(--muted)">v0.3.0</div>
       </div>
     </div>
   </div>`);
-  el.querySelectorAll<HTMLElement>('[data-lang]').forEach((b) => b.addEventListener('click', () => { save.lang = b.dataset.lang as 'ar' | 'en'; persist(); applySettings(); showSettings(); }));
-  el.querySelector('[data-a="sound"]')!.addEventListener('click', () => { save.sound = !save.sound; persist(); setSound(save.sound); if (save.sound) startMusic('menu'); showSettings(); });
+  el.querySelectorAll<HTMLElement>('[data-lang]').forEach((b) => b.addEventListener('click', () => { save.lang = b.dataset.lang as 'ar' | 'en' | 'tr'; persist(); applySettings(); showSettings(); }));
+  el.querySelector('[data-a="sound"]')!.addEventListener('click', () => { save.sound = !save.sound; persist(); setSound(save.sound); showSettings(); });
+  el.querySelector('[data-a="music"]')!.addEventListener('click', () => { save.musicOn = !save.musicOn; persist(); setMusicOn(save.musicOn); if (save.musicOn) startMusic('menu', save.music); showSettings(); });
+  el.querySelectorAll<HTMLElement>('[data-track]').forEach((b) => b.addEventListener('click', () => {
+    unlockAudio(); save.music = b.dataset.track!; persist();
+    if (!save.musicOn) { save.musicOn = true; setMusicOn(true); }
+    // Preview the chosen track right away.
+    if (save.music === 'auto') startMusic('menu', 'auto'); else playTrack(save.music);
+    showSettings();
+  }));
+  bindDiff(el, showSettings);
   mount(el);
 }
 
@@ -301,7 +322,7 @@ function showModes() {
   const el = h(`<div class="screen">
     ${topbar()}
     <div class="modes-grid">
-      ${card('campaign', '🗺️', t('campaign'), t('campaignDesc'), `⭐ ${num(totalStars())}/120`, '')}
+      ${card('campaign', '🗺️', t('campaign'), t('campaignDesc'), `⭐ ${num(totalStars())}/${num(LEVEL_COUNT * 3)}`, '')}
       ${card('challenges', '🐲', t('challenges'), t('challengesDesc'), `🏆 ${num(trophies)}/${num(CHALLENGES.length)}`, save.unlocked > 6 || save.stars[6] ? '' : `🔒 ${t('needLevel')} ${num(6)}`)}
       ${card('survival', '♾️', t('survival'), t('survivalDesc'), `${t('best')}: ${num(save.survivalBest)} ${t('waves')}`, survOpen ? '' : `🔒 ${t('needLevel')} ${num(5)}`)}
       ${card('daily', daily.mod.icon, t('dailyCh'), tk(daily.mod.id), save.dailyDone === today ? t('doneToday') : '💎 25 · 🪙 300', dailyOpen ? '' : `🔒 ${t('needLevel')} ${num(3)}`)}
@@ -430,9 +451,9 @@ function preBattle(index: number) {
       <h2 style="font-size:34px;color:var(--gold2)">${L.boss ? '👑 ' + tk('b_' + L.region) : t('level') + ' ' + num(index)}</h2>
       <div class="big-stars" style="font-size:30px">${starsHtml(save.stars[index] ?? 0)}</div>
       <div style="font-size:13px;color:var(--muted)">${t('starRules')}</div>
+      ${diffPicker()}
       <button class="btn" data-a="go" style="font-size:22px;min-width:200px">⚔️ ${t('play')}</button>
-      <button class="btn ad" data-a="boost" ${left ? '' : 'disabled'}>${t('boostAd')} (${num(left)})</button>
-      <button class="btn secondary small" data-a="cancel">${t('back')}</button>
+      <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn secondary small" data-a="cancel">${t('back')}</button><button class="btn ad small" data-a="boost" ${left ? '' : 'disabled'}>${t('boostAd')} (${num(left)})</button></div>
     </div>
   </div>`);
   el.querySelector('[data-a="go"]')!.addEventListener('click', () => startBattle(index, 0));
@@ -444,6 +465,7 @@ function preBattle(index: number) {
     sessionStorageSet(k, String(Number(sessionStorageGet(k) ?? 0) + 1));
     startBattle(index, 150);
   });
+  bindDiff(el, () => preBattle(index));
   mount(el);
 }
 
@@ -461,11 +483,12 @@ function startBattle(index: number, bonusGold: number) { startLevel(LEVELS[index
 function startLevel(L: LevelDef, bonusGold: number) {
   const index = L.index;
   stopBattleLoop();
-  startMusic(L.boss ? 'boss' : 'battle');
+  startMusic(L.boss || L.kind === 'challenge' ? 'boss' : 'battle', save.music, L.region);
   track('level_start', { level: index, kind: L.kind ?? 'campaign', id: L.id, bonus_gold: bonusGold });
   battle = new Battle(L, perks(), 150 + bonusGold, {
     onEnd: (win) => setTimeout(() => onBattleEnd(win), 900),
     onWave: (n) => { if (n % 5 === 0) ui.appendChild(h(`<div class="boss-banner">👑 ${t('wave')} ${num(n)}</div>`)); },
+    onRank: () => sfx('rank'),
     onUnitTrained: (id) => {
       rolloverDaily();
       save.quests.units++;
@@ -512,7 +535,7 @@ function placeHint() {
 
 function buildHud() {
   const b = battle!;
-  const kindLabel = b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
+  const kindLabel = b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
   const unlockedUnits = PLAYER_UNITS.filter((id) => (b.level.kind === 'campaign' || !b.level.kind ? (isBase(id) ? UNITS[id].unlock <= Math.max(b.level.index, save.unlocked) : unitAvailable(id)) : unitAvailable(id)) && b.isAllowed(id));
   const el = h(`<div class="hud">
     <div class="hud-top">
@@ -520,6 +543,7 @@ function buildHud() {
       <span class="chip">⏱ <b data-r="time">0:00</b></span>
       <div class="minimap" data-r="mini"><div class="view" data-r="view"></div></div>
       <span class="chip">${kindLabel}</span>
+      <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">▶${save.speed === 2 ? '▶' : ''} ×${save.speed}</button>
       <button class="btn secondary small" data-a="pause" aria-label="pause">II</button>
     </div>
     <div class="hud-bottom">
@@ -563,6 +587,8 @@ function buildHud() {
   const ctrl = $(el, '[data-a="ctrl"]');
   ctrl.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.takeControl(); renderer.follow = true; });
   $(el, '[data-a="pause"]').addEventListener('click', () => pauseMenu());
+  const spd = $(el, '[data-a="speed"]');
+  spd.addEventListener('click', () => { save.speed = save.speed === 1 ? 2 : 1; persist(); spd.textContent = `▶${save.speed === 2 ? '▶' : ''} ×${save.speed}`; sfx('click'); });
 
   // Direct-control pad (hold buttons).
   pads[0].querySelectorAll<HTMLElement>('[data-d]').forEach((p) => {
@@ -622,6 +648,8 @@ function updateHud() {
   r.gold.textContent = num(Math.floor(b.gold));
   const s = Math.floor(b.time);
   r.time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const cd = document.querySelector('[data-r="countdown"]');
+  if (cd && b.level.winAfter) cd.textContent = num(Math.max(0, Math.ceil(b.level.winAfter - b.time)));
   const wv = document.querySelector('[data-r="wave"]');
   if (wv) wv.textContent = num(b.survivalWave);
   for (const id of PLAYER_UNITS) {
@@ -655,8 +683,8 @@ function loop(now: number) {
   if (!battle) return;
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
-  battle.update(dt);
-  renderer.autoCam(battle, dt);
+  for (let k = 0; k < save.speed; k++) battle.update(dt);
+  renderer.autoCam(battle, dt * save.speed);
   renderer.draw(battle);
   if ((hudTick = (hudTick + 1) % 3) === 0) updateHud();
   raf = requestAnimationFrame(loop);
@@ -678,6 +706,16 @@ function pauseMenu() {
   });
 }
 
+function statsHtml(b: Battle) {
+  const s = b.stats;
+  const mvp = (Object.entries(s.damage) as [UnitId, number][]).sort((a, z) => z[1] - a[1])[0];
+  const row = (icon: string, k: Key, v: number) => `<div class="stat-cell"><span>${icon}</span><b>${num(Math.round(v))}</b><small>${t(k)}</small></div>`;
+  return `<div class="stats-box">
+    ${row('⚔️', 'st_kills', s.kills)}${row('💀', 'st_lost', s.lost)}${row('🛡️', 'st_trained', s.trained)}${row('🪙', 'st_mined', s.mined)}${b.level.ai ? row('⛏️', 'st_minersKilled', s.enemyMinersKilled) : ''}
+    ${mvp ? `<div class="stat-cell mvp"><img src="${icons[mvp[0]]}" alt=""><small>${t('mvp')}: ${tk('u_' + mvp[0])}</small></div>` : ''}
+  </div>`;
+}
+
 function logUnitStats(b: Battle) {
   track('unit_spawned', { level: b.level.index, ...b.producedCounts });
 }
@@ -695,6 +733,7 @@ function onBattleEnd(win: boolean) {
     const canRevive = !b.revived && L.kind !== 'survival'; // survival pays out on the spot
     const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result lose col" style="align-items:center">
       <h2>${t('defeat')}</h2>
+      ${statsHtml(b)}
       ${canRevive ? `<button class="btn ad" data-a="revive">${t('reviveAd')}</button>` : ''}
       <div class="row"><button class="btn" data-a="retry">${t('retry')}</button><button class="btn secondary" data-a="upg">⚔️ ${t('upgrades')}</button><button class="btn secondary" data-a="menu">${t('back')}</button></div>
     </div></div>`);
@@ -704,7 +743,7 @@ function onBattleEnd(win: boolean) {
       await showAd('rewarded', 'revive');
       el.remove();
       b.revive();
-      startMusic(L.boss ? 'boss' : 'battle');
+      startMusic(L.boss ? 'boss' : 'battle', save.music, L.region);
       lastT = performance.now();
     });
     el.querySelector('[data-a="retry"]')!.addEventListener('click', () => { fail(); startLevel(L, 0); });
@@ -731,7 +770,7 @@ function onBattleEnd(win: boolean) {
   const stars = b.stars(true);
   const prev = save.stars[L.index] ?? 0;
   const firstClear = prev === 0;
-  let gold = Math.round(L.reward * (firstClear ? 1 : 0.6));
+  let gold = Math.round(L.reward * (firstClear ? 1 : 0.6) * DIFFICULTY[save.difficulty].reward);
   const gems = Math.max(0, stars - prev) * 3 + (firstClear && L.boss ? 20 : 0);
   save.stars[L.index] = Math.max(prev, stars);
   if (L.index === save.unlocked && L.index < LEVELS.length) save.unlocked++;
@@ -748,6 +787,7 @@ function onBattleEnd(win: boolean) {
     <h2>${t('victory')}</h2>
     <div class="big-stars">${[0, 1, 2].map((i) => `<span class="${i < stars ? '' : 'off'}" style="animation-delay:${0.2 + i * 0.25}s">★</span>`).join('')}</div>
     <div class="loot"><span class="chip gold-chip" style="font-size:22px">🪙 <b data-r="g">${num(gold)}</b></span>${gems ? `<span class="chip" style="font-size:22px">💎 ${num(gems)}</span>` : ''}</div>
+    ${statsHtml(b)}
     <button class="btn ad" data-a="double">${t('doubleAd')}</button>
     <div class="row"><button class="btn" data-a="next">${t('next')} ${getLang() === 'ar' ? '◀' : '▶'}</button><button class="btn secondary" data-a="menu">${t('campaign')}</button></div>
   </div></div>`);
@@ -800,6 +840,7 @@ function onSpecialWin(b: Battle) {
     gems = first ? 25 : 0;
     save.dailyDone = todayStr();
   }
+  gold = Math.round(gold * DIFFICULTY[save.difficulty].reward);
   save.gold += gold; save.gems += gems;
   rolloverDaily(); save.quests.wins++;
   track('level_complete', { level: L.index, kind: L.kind, id: L.id, seconds: Math.round(b.time) });
@@ -807,6 +848,7 @@ function onSpecialWin(b: Battle) {
   const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result col" style="align-items:center">
     <h2>${t('victory')} ${L.kind === 'challenge' ? '🏆' : ''}</h2>
     <div class="loot"><span class="chip gold-chip" style="font-size:22px">🪙 ${num(gold)}</span>${gems ? `<span class="chip" style="font-size:22px">💎 ${num(gems)}</span>` : ''}</div>
+    ${statsHtml(b)}
     ${unlocked.length ? `<div class="unlock-box"><div style="font-weight:900;color:var(--gold2)">✨ ${t('newUnlock')}</div>${unlocked.map((k) => `<div>${unlockIcon(k)} ${unlockName(k)}</div>`).join('')}</div>` : ''}
     <div class="row">${unlocked.length ? `<button class="btn" data-a="shop">🛒 ${t('shop')}</button>` : ''}<button class="btn secondary" data-a="back">${t('continue')}</button></div>
   </div></div>`);

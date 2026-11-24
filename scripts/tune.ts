@@ -2,7 +2,7 @@
 // of the time at the expected upgrade level. Writes TUNE into src/data/levels.ts.
 // Run: npx tsx scripts/tune.ts
 import { readFileSync, writeFileSync } from 'node:fs';
-import { buildLevel } from '../src/data/levels';
+import { buildLevel, TUNE } from '../src/data/levels';
 import { play, expectedUpgrade } from './balance';
 
 const N = 12;
@@ -13,15 +13,17 @@ const winRate = (i: number, tune: number) => {
   for (let k = 0; k < N; k++) if (play(i, expectedUpgrade(i), 1, L).win) w++;
   return w / N;
 };
-const out: number[] = [];
-for (let i = 1; i <= 40; i++) {
-  let lo = 0.5, hi = 1.6;
+// FROM/TO retune a range and keep the other levels' factors.
+const FROM = Number(process.env.FROM ?? 1), TO = Number(process.env.TO ?? 50), CAP = Number(process.env.CAP ?? 2);
+const out: number[] = Array.from({ length: 50 }, (_, k) => TUNE[k] ?? 1);
+for (let i = FROM; i <= TO; i++) {
+  let lo = 0.35, hi = CAP + 0.1;
   for (let step = 0; step < 7; step++) {
     const mid = (lo + hi) / 2;
     if (winRate(i, mid) >= target(i)) lo = mid; else hi = mid;
   }
   // Keep the intro easy (PRD) and the curve from jumping: cap the factor.
-  out.push(Math.round(Math.min(i <= 9 ? 1 : 1.25, lo) * 100) / 100);
+  out[i - 1] = Math.round(Math.min(i <= 9 ? 1 : CAP, lo) * 100) / 100;
   console.log(`L${i} tune ${out[i - 1]}`);
 }
 const file = 'src/data/levels.ts';

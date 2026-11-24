@@ -60,6 +60,33 @@ Desktop keys: `1–6` train units · `E` take/release control · `A`/`D` move ·
 
 `npx tsx scripts/challenges.ts --tune` tunes each challenge so the bot wins about 50% at 2 upgrade levels above expected.
 
+## v0.3: smarter enemy, difficulty modes, more content, Turkish, music
+
+- **The enemy has an economy:** it mines gold with its own miners and buys units like you do. Killing its miners starves it.
+- **Difficulty (easy / medium / hard)** sets the enemy commander's intelligence as well as its stats:
+  - Easy: picks units at random.
+  - Medium: counters your most common unit.
+  - Hard: saves up for counters, keeps a ranged backline, retreats when losing, raids your miners with fast units, and fires arrow volleys.
+  - Rewards scale ×0.8 / ×1 / ×1.5.
+- **Tower archers** on both forts; yours can be upgraded in the shop.
+- **Guided arrows:** shots track their target, so archers hit units that are moving.
+- **Units queue and sidestep** into free lanes instead of stacking; knockback on heavy hits; charges re-arm.
+- **Veteran ranks** ★/★★ after 3 and 7 kills (+15% HP and damage each).
+- **18 player units:** Horse Knight and Crossbowman from the campaign; War Drummer and War Elephant from new challenges.
+- **New monsters:** mummy, skeleton, cobra, plus bosses Mummy King, Cobra Queen and Phoenix.
+- **Fifth region, Forgotten Tombs:** 50 levels in total.
+- **12 challenges.** New ones:
+  - The Siege: survive 150 s.
+  - The Stampede.
+  - Cobra Queen.
+  - The Phoenix.
+- **New skills:** Reinforcements and Phoenix Inferno; Tower Archers boost.
+- **Turkish** (full translation in `src/i18n-tr.ts`), alongside Arabic and English.
+- **5 original music tracks** in Arabic maqams (Hijaz, Bayati, Kurd, Nahawand, Rast). Pick one in Settings or leave it on Auto (the music follows the screen and region). Separate music and effects switches.
+- **×2 game speed**, a battle stats panel with the MVP unit, and upgraded graphics (shading, idle breathing, clouds, sun glow, snow caps, mud-brick forts with wooden gates, mine with cart, vignette).
+
+Balance: `scripts/tune.ts` (now with `FROM`/`TO`/`CAP`) tunes the campaign on medium. Run `DIFF=hard UPG_BONUS=3 npx tsx scripts/balance.ts` to check hard.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.

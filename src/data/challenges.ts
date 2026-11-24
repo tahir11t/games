@@ -1,6 +1,6 @@
 import { UNITS, type EnemyId, type UnitId } from './units';
 import type { ChallengeId, AbilityId, PassiveId } from './skills';
-import { buildLevel, type LevelDef, type Mods, type RegionId, type Wave } from './levels';
+import { buildLevel, costOf, type LevelDef, type Mods, type RegionId, type Wave } from './levels';
 
 export interface ChallengeDef {
   id: ChallengeId;
@@ -15,6 +15,7 @@ export interface ChallengeDef {
   loopAfter: number;
   allowed?: UnitId[];
   mods?: Mods;
+  winAfter?: number; // survive N seconds instead of destroying the fort
   reward: { gold: number; gems: number; unlocks: (UnitId | AbilityId | PassiveId)[] };
 }
 
@@ -40,6 +41,11 @@ export const CHALLENGES: ChallengeDef[] = [
     reward: { gold: 700, gems: 30, unlocks: ['eagle'] },
   },
   {
+    id: 'siege', icon: '🏰', region: 'dunes', reqLevel: 14, boss: 'golem', castleHp: Infinity, enemyMult: 1.3, loopAfter: 200, winAfter: 150,
+    waves: [...every(10, 150, 10, 'bandit', 2, 0.3), ...every(30, 150, 20, 'golem', 1), ...every(25, 150, 25, 'sandmage', 2)],
+    reward: { gold: 900, gems: 40, unlocks: ['drummer'] },
+  },
+  {
     id: 'scorpion', icon: '🦂', region: 'dunes', reqLevel: 12, boss: 'scorpking', castleHp: 2600, enemyMult: 1.3, loopAfter: 150,
     waves: [...every(12, 140, 18, 'bandit', 2), ...every(25, 140, 25, 'sandmage', 1), ...W([45, 'scorpking', 1])],
     reward: { gold: 900, gems: 40, unlocks: ['assassin'] },
@@ -61,6 +67,11 @@ export const CHALLENGES: ChallengeDef[] = [
     reward: { gold: 1600, gems: 60, unlocks: ['giant'] },
   },
   {
+    id: 'stampede', icon: '🐘', region: 'mountains', reqLevel: 30, boss: 'elephant', castleHp: 3800, enemyMult: 1.6, loopAfter: 170,
+    waves: [...every(14, 160, 14, 'hyena', 3), ...every(24, 160, 22, 'camel', 1), ...every(30, 160, 30, 'lion', 2), ...W([60, 'elephant', 1, 1.5], [120, 'elephant', 2, 1.5])],
+    reward: { gold: 1900, gems: 70, unlocks: ['elephant'] },
+  },
+  {
     id: 'djinn', icon: '🧞', region: 'shadow', reqLevel: 32, boss: 'djinn', castleHp: 4200, enemyMult: 1.75, loopAfter: 170,
     waves: [...every(12, 160, 14, 'ghost', 2, 0.25), ...every(30, 160, 30, 'vulture', 3), ...W([60, 'djinn', 1])],
     reward: { gold: 2200, gems: 80, unlocks: ['genie', 'meteor'] },
@@ -70,12 +81,22 @@ export const CHALLENGES: ChallengeDef[] = [
     waves: [...every(12, 170, 15, 'ghost', 2), ...every(20, 170, 25, 'golem', 1), ...every(25, 170, 20, 'vulture', 2), ...W([70, 'warlord', 1], [130, 'scorpking', 1])],
     reward: { gold: 3000, gems: 120, unlocks: ['hero'] },
   },
+  {
+    id: 'cobra', icon: '🐍', region: 'tombs', reqLevel: 42, boss: 'cobraqueen', castleHp: 4600, enemyMult: 1.95, loopAfter: 170,
+    waves: [...every(12, 160, 12, 'cobra', 2, 0.3), ...every(30, 160, 24, 'skeleton', 3), ...W([55, 'cobraqueen', 1])],
+    reward: { gold: 3200, gems: 120, unlocks: ['reinforce'] },
+  },
+  {
+    id: 'phoenix', icon: '🔥', region: 'tombs', reqLevel: 46, reqChallenge: ['cobra'], boss: 'phoenix', castleHp: 5000, enemyMult: 2.05, loopAfter: 170,
+    waves: [...every(12, 160, 15, 'vulture', 3, 0.3), ...every(20, 160, 20, 'mummy', 1), ...W([60, 'phoenix', 1])],
+    reward: { gold: 3600, gems: 150, unlocks: ['inferno'] },
+  },
 ];
 
 export const challengeById = (id: string) => CHALLENGES.find((c) => c.id === id)!;
 
 /** Per-challenge strength factors from scripts/challenges.ts --tune (1 = untuned). */
-export const CH_TUNE: Partial<Record<ChallengeId, number>> = { hyenas: 0.95, archery: 0.7, scorpion: 0.75, roc: 0.37, worm: 0.5, titan: 0.65, djinn: 0.23, warlord: 0.23 };
+export const CH_TUNE: Partial<Record<ChallengeId, number>> = { hyenas: 1.23, archery: 1.14, siege: 1.21, scorpion: 0.46, roc: 0.31, worm: 0.4, titan: 0.41, stampede: 0.27, djinn: 0.21, warlord: 0.22, cobra: 0.29, phoenix: 0.2 };
 
 export function challengeLevel(c: ChallengeDef, tune = CH_TUNE[c.id] ?? 1): LevelDef {
   return {
@@ -83,7 +104,7 @@ export function challengeLevel(c: ChallengeDef, tune = CH_TUNE[c.id] ?? 1): Leve
     index: 100 + CHALLENGES.indexOf(c), region: c.region, boss: true, castleHp: c.castleHp, enemyMult: c.enemyMult * Math.sqrt(tune),
     startGold: 300 + c.reqLevel * 12,
     waves: c.waves.map((w) => ({ ...w, t: Math.max(22, w.t), count: UNITS[w.unit].boss ? w.count : Math.max(1, Math.round(w.count * Math.min(1, tune))) })).sort((a, b) => a.t - b.t), loopAfter: c.loopAfter, reward: c.reward.gold,
-    kind: 'challenge', id: c.id, allowed: c.allowed, mods: c.mods, noCounters: true,
+    kind: 'challenge', id: c.id, allowed: c.allowed, mods: c.mods, noCounters: true, winAfter: c.winAfter, towerDmg: c.winAfter ? 0 : 6 + c.reqLevel * 0.4,
   };
 }
 
@@ -103,7 +124,7 @@ export function dailyFor(date: string, unlocked: number): { mod: DailyMod; level
   const n = Number(date.replace(/-/g, ''));
   const mod = DAILY_MODS[n % DAILY_MODS.length];
   // A few levels below the player's frontier: the rule is the challenge, not raw stats.
-  const base = buildLevel(Math.max(3, Math.min(36, unlocked - 4)));
+  const base = buildLevel(Math.max(3, Math.min(46, unlocked - 4)));
   const level: LevelDef = {
     ...base, index: 200, kind: 'daily', id: mod.id, allowed: mod.allowed, mods: mod.mods, noCounters: true, startGold: 250,
     waves: [...base.waves, ...(mod.extra ?? [])].sort((a, b) => a.t - b.t), reward: 300,
@@ -117,8 +138,9 @@ export function survivalLevel(): LevelDef {
 }
 const SURVIVAL_POOL: EnemyId[][] = [
   ['bandit', 'sword'], ['bandit', 'hyena', 'archer'], ['hyena', 'sandmage', 'spear'], ['vulture', 'golem', 'sandmage'], ['ghost', 'golem', 'vulture', 'camel'],
+  ['skeleton', 'mummy', 'cobra', 'ghost'], ['mummy', 'cavalry', 'crossbow', 'vulture', 'golem'],
 ];
-const SURVIVAL_BOSSES: EnemyId[] = ['scorpking', 'roc', 'worm', 'titan', 'djinn', 'warlord'];
+const SURVIVAL_BOSSES: EnemyId[] = ['scorpking', 'roc', 'worm', 'titan', 'djinn', 'cobraqueen', 'phoenix', 'mummyking', 'warlord'];
 /** Wave n (1-based): budgeted group + a boss every 5th wave. */
 export function survivalWave(n: number, rnd: () => number): { unit: EnemyId; count: number; mult: number }[] {
   const pool = SURVIVAL_POOL[Math.min(SURVIVAL_POOL.length - 1, Math.floor((n - 1) / 3))];
@@ -134,4 +156,4 @@ export function survivalWave(n: number, rnd: () => number): { unit: EnemyId; cou
   if (n % 5 === 0) res.push({ unit: SURVIVAL_BOSSES[(n / 5 - 1) % SURVIVAL_BOSSES.length], count: 1, mult: 0.45 + n * 0.03 });
   return res;
 }
-const costOf = (u: EnemyId) => ({ bandit: 70, sword: 75, hyena: 60, archer: 150, sandmage: 180, spear: 250, vulture: 90, golem: 450, ghost: 200, camel: 400 } as Partial<Record<EnemyId, number>>)[u] ?? 200;
+
