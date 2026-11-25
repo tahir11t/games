@@ -1,4 +1,4 @@
-import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, CITADEL_X, castleX, type Unit, type SupplyDrop } from './battle';
+import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, CITADEL_X, ROAD_Y, castleX, type Unit, type SupplyDrop } from './battle';
 const LAST_STAND_VIS = 420;
 import type { RegionId } from '../data/levels';
 import { drawArt, glowDot, isLowQuality, shade as shadeHex } from './art';
@@ -119,7 +119,8 @@ export class Renderer {
     for (const d of b.drops) this.drawDrop(d, time);
 
     this.lastControlled = b.controlled;
-    const sorted = [...b.units].sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || a.lane - z.lane);
+    if (b.roadsOn) this.drawRoads(b);
+    const sorted = [...b.units].sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || b.groundY(a) - b.groundY(z));
     for (const u of sorted) if (!u.hidden) this.drawUnit(u, b);
     // melee slash arcs and hit sparks
     for (const e of b.fx) {
@@ -638,7 +639,7 @@ export class Renderer {
       for (let k = 0; k < b.towerArchers[slot]; k++) {
         const [ax, ay] = posts[k];
         const towerDef = UNITS[({ elves: 'elfarcher', ghosts: 'banshee', zombies: 'skelarcher', dwarves: 'axethrower' } as Record<string, EnemyId>)[style] ?? 'archer'];
-        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 , nation: side };
+        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 , nation: side, road: 0, slow: 0 };
         c.save(); c.translate(ax, ay); c.scale(0.8, 0.8); c.translate(-ax, -ay - 4);
         drawArt({ c, u: a, x: ax, gy: ay, f, t: time + k, swing: 0, atk, side, region, flash: false, tier: a.tier });
         c.restore();
@@ -670,6 +671,26 @@ export class Renderer {
     c.fillStyle = invulnerable ? '#a46cff' : pct > 0.5 ? '#5cc85c' : pct > 0.25 ? '#e8b730' : '#e0453a';
     c.beginPath(); c.roundRect(x - bw / 2, G - 337, bw * Math.max(0, pct), 10, 4); c.fill();
     TEAM[side] = team0;
+  }
+
+  /** Nations War roads: two packed-earth tracks with wheel ruts and road signs at each end. */
+  private drawRoads(b: Battle) {
+    const c = this.ctx;
+    for (const r of [0, 1]) {
+      const y = GROUND + ROAD_Y[r], hh = r === 0 ? 14 : 18;
+      const g = c.createLinearGradient(0, y - hh / 2, 0, y + hh / 2);
+      g.addColorStop(0, 'rgba(120,85,50,.0)'); g.addColorStop(0.3, 'rgba(120,85,50,.32)'); g.addColorStop(0.7, 'rgba(95,65,35,.34)'); g.addColorStop(1, 'rgba(95,65,35,0)');
+      c.fillStyle = g; c.fillRect(CASTLE_X[0], y - hh / 2, CASTLE_X[1] - CASTLE_X[0], hh);
+      c.strokeStyle = 'rgba(60,40,20,.25)'; c.lineWidth = 1.5; c.setLineDash([14, 10]);
+      for (const k of [-0.22, 0.22]) { c.beginPath(); c.moveTo(CASTLE_X[0] + 60, y + hh * k); c.lineTo(CASTLE_X[1] - 60, y + hh * k); c.stroke(); }
+      c.setLineDash([]);
+      for (const sx of [CASTLE_X[0] + 150, CASTLE_X[1] - 150]) { // signpost
+        c.fillStyle = '#6b4423'; c.fillRect(sx - 1.5, y - 34, 3, 30);
+        c.fillStyle = '#c9a46a'; c.beginPath(); c.roundRect(sx - 14, y - 40, 28, 12, 2); c.fill();
+        c.fillStyle = '#3a2410'; c.font = '900 9px system-ui'; c.textAlign = 'center'; c.fillText(r === 0 ? '⬆ N' : '⬇ S', sx, y - 31);
+      }
+    }
+    if (b.level.war?.ffa) { c.fillStyle = 'rgba(255,255,255,.05)'; c.fillRect(CITADEL_X - 120, GROUND + ROAD_Y[0] - 10, 240, 20); } // the north road bypasses the citadel
   }
 
   /** The Oasis Well: palms, a stone well and a banner showing who holds it, with a capture ring. */
@@ -742,7 +763,7 @@ export class Renderer {
     const c = this.ctx;
     const f = u.face ?? (u.side === 0 ? 1 : -1);
     const gy = b.unitY ? b.unitY(u) : GROUND + u.lane;
-    const groundY = GROUND + u.lane;
+    const groundY = b.groundY ? b.groundY(u) : GROUND + u.lane;
     c.save();
     // soft ground shadow (flying units too, so you can read their position)
     const sw = Math.min(70, u.def.height * 0.45) * (u.def.flying ? 0.7 : 1);
@@ -773,7 +794,7 @@ export class Renderer {
     const swing = u.moving ? Math.sin(u.anim) * 0.55 : 0;
     const atk = u.attacking > 0 ? Math.sin((1 - u.attacking / 0.3) * Math.PI) : 0;
     // a new tier (every 5 upgrade levels) also makes the unit a little bigger
-    const grow = 1 + (u.tier ?? 0) * 0.035;
+    const grow = (1 + (u.tier ?? 0) * 0.035) * (b.roadsOn && u.road === 0 ? 0.88 : 1); // the north road is farther away
     // attack lunge with a little squash & stretch for melee hits
     const lunge = !u.def.ranged && !u.def.miner && atk > 0 ? atk : 0;
     const sx = grow * (1 + lunge * 0.07), sy = grow * (1 - lunge * 0.05);
@@ -804,7 +825,7 @@ export class Renderer {
     const wide = ['camel', 'cavalry', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss', 'elephant', 'cobra', 'cobraqueen'].includes(def.id) ? 1.5 : 1;
     const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
     ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
-    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier, nation: 0 };
+    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier, nation: 0, road: 0, slow: 0 };
     const y = def.flying ? GROUND - 30 : GROUND;
     drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 1, swing: 0, atk: 0, side, region: 'oasis', flash: false, tier });
     return cv.toDataURL();

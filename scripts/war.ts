@@ -3,14 +3,15 @@
 // Run: npx tsx scripts/war.ts   (REF=30 N=10)
 import { Battle } from '../src/game/battle';
 import { UNITS, type UnitId } from '../src/data/units';
-import { warLevel, WAR_MODES, WAR_TIERS, type WarMode } from '../src/data/war';
+import { warLevel, blitzLevel, BLITZ_BOSSES, WAR_MODES, WAR_TIERS, type WarMode } from '../src/data/war';
+import type { LevelDef } from '../src/data/levels';
 import { expectedUpgrade } from './balance';
 
 const REF = Number(process.env.REF ?? 30), N = Number(process.env.N ?? 10);
 const DATES = ['2026-11-25', '2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29'];
 
-export function playWar(mode: WarMode, tier: number, ref: number, date: string) {
-  const L = warLevel(mode, tier, ref, date);
+export function playWar(mode: WarMode, tier: number, ref: number, date: string, level?: LevelDef) {
+  const L = level ?? warLevel(mode, tier, ref, date);
   const upg = expectedUpgrade(ref);
   const lv = Object.fromEntries(Object.keys(UNITS).map((k) => [k, upg])) as Record<UnitId, number>;
   lv.miner = 1;
@@ -30,6 +31,8 @@ export function playWar(mode: WarMode, tier: number, ref: number, date: string) 
     if (army.length >= 10 && b.mode !== 'attack') b.setMode('attack');
     else if (army.length < 4 && b.mode === 'attack') b.setMode('defend');
     if (b.ability >= 1 && enemies.length >= 3) b.useAbility();
+    for (const c of b.cmds) if (c.ally && c.power >= 1) b.usePower(c); // call the ally's nation power
+    if (L.war?.timeLimit && army.length >= 6 && b.mode !== 'attack') b.setMode('attack'); // Blitz: no time to turtle
     if (b.gold > b.mineCost() + 250) b.upgradeMine();
   }
   return { win: res === true, time: b.time, timeout: res === null };
@@ -44,5 +47,15 @@ if (process.argv[1]?.endsWith('war.ts')) {
       row.push(`T${tier + 1} ${String(Math.round((w / N) * 100)).padStart(3)}% ${w ? Math.round(t / w) + 's' : '-'}${to ? ` (${to} timeout)` : ''}`);
     }
     console.log(mode.padEnd(5), row.join('  '));
+  }
+  // Boss Blitz: win rate and average time per boss, alone and with an ally
+  for (let i = 0; i < BLITZ_BOSSES.length; i++) {
+    const row: string[] = [];
+    for (const ally of [false, true]) {
+      let w = 0, t = 0;
+      for (let k = 0; k < N; k++) { const r = playWar('blitz', 0, REF, DATES[k % DATES.length], blitzLevel(i, ally, REF, DATES[k % DATES.length])); if (r.win) { w++; t += r.time; } }
+      row.push(`${ally ? 'ally' : 'solo'} ${String(Math.round((w / N) * 100)).padStart(3)}% ${w ? Math.round(t / w) + 's' : '-'}`);
+    }
+    console.log(('blitz ' + BLITZ_BOSSES[i].id).padEnd(18), row.join('  '));
   }
 }

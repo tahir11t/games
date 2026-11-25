@@ -43,14 +43,18 @@ export interface NationSpec {
   side: 0 | 1; // 0 = fights beside the player, 1 = against
   castle: 0 | 1 | 2; // fort slot it defends: 0 player's (allies), 1 right fort, 2 mid-field citadel
   stat: number; income: number; startGold: number; color: string; ally?: boolean;
+  road?: number; // fixed road for this nation's soldiers (else chosen each time)
 }
 export interface WarSpec {
-  mode: 'ffa' | 'duo' | 'raid';
+  mode: 'ffa' | 'duo' | 'raid' | 'blitz';
   ffa: boolean; // every nation fights every other nation
   nations: NationSpec[];
   citadelHp?: number;
   boss?: EnemyId; bossAt?: number; bossMult?: number;
   grace?: number;
+  roads?: boolean; // two roads (north / south)
+  timeLimit?: number; // Boss Blitz: seconds to defeat the boss
+  bossDmg?: number; // extra boss damage factor
 }
 
 export interface LevelDef {

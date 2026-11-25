@@ -440,7 +440,7 @@ h1, h2, h3 { margin: 0; }
 
 /* ---- v1.2: Nations War ---- */
 .war-note { text-align: center; color: var(--muted); font-weight: 700; font-size: 13px; margin: 6px 0; }
-.war-grid { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-content: start; }
+.war-grid { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-content: start; }
 .war-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
 .war-h { display: flex; align-items: center; gap: 6px; font-size: 19px; color: var(--gold2); }
 .war-h .chip { margin-inline-start: auto; font-size: 12px; }
@@ -462,3 +462,32 @@ h1, h2, h3 { margin: 0; }
 .weekly-bonus { background: linear-gradient(90deg, rgba(255,211,77,.18), rgba(0,0,0,.2)); border-radius: 12px; padding: 4px 8px; }
 .festival { display: inline-block; margin: -8px 0 10px; padding: 4px 14px; border-radius: 999px; background: linear-gradient(90deg, #c2410c, #f59e0b); color: #fff; font-weight: 900; font-size: 14px; box-shadow: 0 4px 14px rgba(245,158,11,.35); }
 .idle-box h3 { margin: 4px 0; }
+
+/* ---- v1.3: roads, roles, ally power, Boss Blitz ---- */
+.ally-power { background: conic-gradient(rgba(56,182,168,.55) var(--p, 0%), rgba(43,29,16,.88) 0) !important; }
+.ally-power.ready { box-shadow: 0 0 0 3px #38b6a8, 0 0 16px rgba(56,182,168,.7); animation: pulse 1.2s infinite; }
+.war-fac .role { font-style: normal; font-size: 9.5px; color: #8fe0d6; font-weight: 900; }
+.roles-box { margin-top: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; font-size: 12px; }
+.roles-box > b { grid-column: 1 / -1; color: var(--gold2); font-size: 15px; }
+.role-row { display: grid; grid-template-columns: 26px 1fr; column-gap: 6px; align-items: start; }
+.role-row span { font-size: 20px; grid-row: span 2; }
+.role-row small { color: var(--sand2); line-height: 1.35; }
+.blitz-card { border-color: #e0662e; }
+.blitz-bosses { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.blitz-boss { position: relative; width: 50px; height: 50px; border-radius: 10px; background: rgba(0,0,0,.3); border: 2px solid transparent; padding: 0; }
+.blitz-boss img { width: 100%; height: 100%; }
+.blitz-boss.on { border-color: var(--gold2); background: rgba(255,211,77,.15); }
+.blitz-boss i { position: absolute; top: -4px; inset-inline-end: -4px; font-style: normal; background: var(--ok); color: #fff; border-radius: 50%; width: 16px; height: 16px; font-size: 11px; line-height: 16px; }
+.blitz-pick { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.blitz-pick small { color: var(--muted); }
+[data-r="countdown"].hurry { color: #ff6b5a; animation: pulse 0.6s infinite; }
+@media (max-width: 860px) { .roles-box { grid-template-columns: 1fr; } }
+.war-screen { overflow-y: auto; touch-action: pan-y; }
+@media (max-width: 1100px) { .war-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .war-grid { grid-template-columns: 1fr; } }
+.battle-feed { position: absolute; top: 96px; inset-inline-start: 12px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; z-index: 5; max-width: 46vw; }
+.feed-line { background: rgba(20,12,6,.78); border-inline-start: 4px solid #ff6b5a; border-radius: 8px; padding: 4px 10px; font-size: 13px; color: var(--sand); animation: feedIn 4.2s forwards; }
+.feed-line.ally { border-color: #38b6a8; }
+@keyframes feedIn { 0% { opacity: 0; transform: translateX(-20px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+:root[dir="rtl"] .feed-line { animation-name: feedInR; }
+@keyframes feedInR { 0% { opacity: 0; transform: translateX(20px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }

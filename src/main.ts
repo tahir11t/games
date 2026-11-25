@@ -4,7 +4,8 @@ import { BOARDS, submitAll, fetchTop, rankOf, myBest, flag, displayName, cleanNa
 import { a11y } from './game/render';
 import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents, currentUser, progress } from './save';
 import { dailyQuests, weeklyQuests, msToReset, WEEKLY_BONUS, type QuestDef } from './data/quests';
-import { WAR_MODES, WAR_TIERS, WAR_ICON, warLevel, warLineup, type WarMode } from './data/war';
+import { WAR_MODES, WAR_TIERS, WAR_ICON, warLevel, warLineup, blitzLevel, BLITZ_BOSSES, BLITZ_TIME, type WarMode } from './data/war';
+import { ROLES } from './game/battle';
 import { UNITS, PLAYER_UNITS, BASE_UNITS, MAX_UNIT_LEVEL, upgradeCost, upgradeMult, type UnitId } from './data/units';
 import { LEVELS, REGIONS, type RegionId, type LevelDef } from './data/levels';
 import { ABILITIES, PASSIVES, PASSIVE_MAX, UNIT_SHOP, type AbilityId, type PassiveId, type Requirement, type Perks } from './data/skills';
@@ -148,6 +149,15 @@ const ACH: { id: string; icon: string; gems: number }[] = [
 ];
 /** Short vibration on supported phones (Settings → Vibration). */
 function buzz(pattern: number | number[]) { try { if (save.vibrate && 'vibrate' in navigator) navigator.vibrate(pattern); } catch { /* not supported */ } }
+/** Compact battle feed (nation powers): a short line that slides in at the side and fades. */
+function feed(html: string, cls = '') {
+  let box = ui.querySelector<HTMLElement>('.battle-feed');
+  if (!box) { box = h('<div class="battle-feed"></div>'); ui.appendChild(box); }
+  const line = h(`<div class="feed-line ${cls}">${html}</div>`);
+  box.appendChild(line);
+  while (box.children.length > 4) box.firstElementChild!.remove();
+  setTimeout(() => line.remove(), 4200);
+}
 /** A brief banner across the battlefield. */
 function bannerMsg(html: string, cls = '') {
   // banners that fire together stack downward instead of overlapping
@@ -571,7 +581,7 @@ function showSettings() {
           <button class="btn small ${save.a11y.colorblind ? '' : 'secondary'}" data-a="cb">🎨 ${t('colorblind')}</button>
           <button class="btn small ${save.a11y.calm ? '' : 'secondary'}" data-a="calm">🌙 ${t('calm')}</button></div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v1.2.0</div>
+        <div style="font-size:12px;color:var(--muted)">v1.3.0</div>
       </div>
     </div>
   </div>`);
@@ -635,9 +645,21 @@ function showModes() {
 
 // ---------------- Nations War ----------------
 const warOpen = () => save.unlocked > 12 || !!save.stars[12];
+let blitzBoss = 0;
+/** Boss Blitz panel: pick a boss, then fight alone or with an ally; best times per boss. */
+function blitzPanel() {
+  const best = save.war.blitzBest ?? {};
+  const fmt = (s?: number) => (s === undefined ? '—' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+  const B = BLITZ_BOSSES[blitzBoss];
+  return `<div class="panel war-card blitz-card"><div class="war-h">⏱️ <b>${t('blitz')}</b>${save.war.firstWin.blitz !== todayStr() ? '<span class="chip">💎 +20</span>' : ''}</div>
+    <div class="war-desc">${t('blitzDesc')}</div>
+    <div class="blitz-bosses">${BLITZ_BOSSES.map((bb, i) => `<button class="blitz-boss ${i === blitzBoss ? 'on' : ''}" data-bb="${i}" title="${unitName(bb.id)}"><img src="${enemyIcon(bb.id)}" alt="">${best[`${i}-0`] !== undefined || best[`${i}-1`] !== undefined ? '<i>✓</i>' : ''}</button>`).join('')}</div>
+    <div class="blitz-pick"><b>${unitName(B.id)}</b><small>⏱ ${fmt(BLITZ_TIME)} · ${t('bestTime')}: 🛡️ ${fmt(best[`${blitzBoss}-0`])} · 🤝 ${fmt(best[`${blitzBoss}-1`])}</small></div>
+    <div class="row war-tiers"><button class="btn small" data-blitz="0">🛡️ ${t('solo')}</button><button class="btn small" data-blitz="1">🤝 ${t('withAlly')}</button></div></div>`;
+}
 function showWar() {
   const today = todayStr();
-  const fac = (id: string) => `<span class="war-fac" title="${tk('f_' + id)}"><img src="${facIcon(factionById(id).showcase)}" alt=""><small>${factionById(id).icon} ${tk('f_' + id)}</small></span>`;
+  const fac = (id: string) => `<span class="war-fac" title="${t(('role_' + id) as Key)}: ${t(('roled_' + id) as Key)} · ⚡ ${t(('power_' + ROLES[id].power) as Key)}: ${t(('powerd_' + ROLES[id].power) as Key)}"><img src="${facIcon(factionById(id).showcase)}" alt=""><small>${factionById(id).icon} ${tk('f_' + id)}</small><i class="role">${t(('role_' + id) as Key)}</i></span>`;
   const panel = (mode: WarMode) => {
     const { foes, allies } = warLineup(mode, today);
     const you = `<span class="war-fac you"><img src="${iconFor('hero')}" alt=""><small>🛡️ ${t('you')}</small></span>`;
@@ -653,11 +675,14 @@ function showWar() {
     return `<div class="panel war-card"><div class="war-h">${WAR_ICON[mode]} <b>${t(('war_' + mode) as Key)}</b>${save.war.firstWin[mode] !== today ? '<span class="chip">💎 +20</span>' : ''}</div>
       <div class="war-desc">${t(('ward_' + mode) as Key)}</div><div class="war-lineup">${lineup}</div><div class="row war-tiers">${tiers}</div></div>`;
   };
-  const el = h(`<div class="screen">${topbar()}
+  const el = h(`<div class="screen war-screen">${topbar()}
     <div class="war-note">🗓️ ${t('warRotates')} · ⏳ ${hms(msToReset().day)}</div>
-    <div class="war-grid">${WAR_MODES.map(panel).join('')}</div>
+    <div class="war-grid">${WAR_MODES.map(panel).join('')}${blitzPanel()}</div>
+    <div class="panel roles-box"><b>🎭 ${t('roles')}</b>${Object.keys(ROLES).map((id) => `<div class="role-row"><span>${ROLES[id].icon}</span><b>${id === 'desert' ? t('desertArmy') : tk('f_' + id)} · ${t(('role_' + id) as Key)}</b><small>${t(('roled_' + id) as Key)}${ROLES[id].power !== 'command' ? ` · ⚡ ${t(('power_' + ROLES[id].power) as Key)}: ${t(('powerd_' + ROLES[id].power) as Key)}` : ''}</small></div>`).join('')}</div>
     <div class="row" style="justify-content:center">${diffPicker()}</div>
   </div>`);
+  el.querySelectorAll<HTMLElement>('[data-bb]').forEach((b) => b.addEventListener('click', () => { sfx('click'); blitzBoss = Number(b.dataset.bb); showWar(); }));
+  el.querySelectorAll<HTMLElement>('[data-blitz]').forEach((b) => b.addEventListener('click', () => { sfx('click'); startLevel(blitzLevel(blitzBoss, b.dataset.blitz === '1', save.unlocked, todayStr()), 0); }));
   el.querySelectorAll<HTMLElement>('[data-war]').forEach((b) => b.addEventListener('click', () => {
     sfx('click');
     startLevel(warLevel(b.dataset.war as WarMode, Number(b.dataset.tier), save.unlocked, todayStr()), 0);
@@ -995,6 +1020,7 @@ function startLevel(L: LevelDef, bonusGold: number) {
     onPerfect: () => { sfx('rank'); buzz(35); const p = h(`<div class="perfect-pop">✦ ${t('perfect')}</div>`); ui.appendChild(p); setTimeout(() => p.remove(), 900); },
     onSpawn: (id, side) => { if (side === 1 && !save.seen.includes(id)) save.seen.push(id); },
     onEliminated: (nation) => { const c = battle?.cmds.find((k) => k.nation === nation); if (c) { bannerMsg(`🏳️ ${tk('f_' + c.faction)} ${t('eliminated')}`, 'rush'); buzz([40, 30, 40]); } },
+    onPower: (nation, power) => { const c = battle?.cmds.find((k) => k.nation === nation); if (c) feed(`${ROLES[c.faction]?.icon ?? ''} <b>${tk('f_' + c.faction)}</b> ⚡ ${t(('power_' + power) as Key)}`, c.ally ? 'ally' : 'foe'); },
     onBoss: (id) => { if ((id as string) === 'enrage') { bannerMsg(`🔥 ${t('bossEnraged')}`, 'rage'); buzz([80, 40, 80]); } else { bannerMsg(`👑 ${tk('u_' + id)}`, 'rage'); buzz(120); } },
     onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
     onUnitTrained: (id) => {
@@ -1012,7 +1038,7 @@ function startLevel(L: LevelDef, bonusGold: number) {
   tutorialStep = index === 1 && !save.tutorialDone ? 1 : 0;
   if (tutorialStep) track('tutorial_step', { step: 1 });
   buildHud();
-  const warBanner = L.kind === 'war' ? `${WAR_ICON[L.war!.mode]} ${t(('war_' + L.war!.mode) as Key)} · ${'★'.repeat(Number(L.id!.split('-')[1]) + 1)}` : '';
+  const warBanner = L.war?.mode === 'blitz' ? `⏱️ ${t('blitz')} · ${tk('u_' + L.war.boss) !== 'u_' + L.war.boss ? tk('u_' + L.war.boss) : unitName(L.war.boss!)}` : L.kind === 'war' ? `${WAR_ICON[L.war!.mode]} ${t(('war_' + L.war!.mode) as Key)} · ${'★'.repeat(Number(L.id!.split('-')[1]) + 1)}` : '';
   const towerBanner = L.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(L.id))} · ${towerRule(Number(L.id)).icon} ${tk(towerRule(Number(L.id)).id)}` : '';
   const fac = L.kind === 'conquest' ? factionById(L.id!.split('-')[0]) : null;
   const banner = warBanner || towerBanner || (fac ? `${fac.icon} ${tk('f_' + fac.id)} · ${t('battle')} ${num(Number(L.id!.split('-')[1]))}` : L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '');
@@ -1075,7 +1101,7 @@ function placeHint() {
 
 function buildHud() {
   const b = battle!;
-  const kindLabel = b.level.kind === 'war' ? `${WAR_ICON[b.level.war!.mode]} ${t(('war_' + b.level.war!.mode) as Key)}` : b.level.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(b.level.id))}` : b.level.kind === 'conquest' ? `${factionById(b.level.id!.split('-')[0]).icon} ${t('battle')} ${num(Number(b.level.id!.split('-')[1]))}` : b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
+  const kindLabel = b.level.war?.timeLimit ? `⏱️ <b data-r="countdown">2:00</b>` : b.level.kind === 'war' ? `${WAR_ICON[b.level.war!.mode]} ${t(('war_' + b.level.war!.mode) as Key)}` : b.level.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(b.level.id))}` : b.level.kind === 'conquest' ? `${factionById(b.level.id!.split('-')[0]).icon} ${t('battle')} ${num(Number(b.level.id!.split('-')[1]))}` : b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
   const desert = b.roster === PLAYER_UNITS;
   const unlockedUnits: EnemyId[] = desert
     ? PLAYER_UNITS.filter((id) => (b.level.kind === 'campaign' || !b.level.kind ? (isBase(id) ? UNITS[id].unlock <= Math.max(b.level.index, save.unlocked) : unitAvailable(id)) : unitAvailable(id)) && b.isAllowed(id))
@@ -1106,6 +1132,8 @@ function buildHud() {
       <button class="tbtn" data-a="hide" title="${t('hideMiners')}">🏠<b data-r="hidelbl">${t('hide')}</b></button>
       <button class="tbtn" data-a="mine" title="${t('mineUp')}">⛏️<b data-r="mlvl">1/3</b><small data-r="mcost"></small></button>
       <button class="tbtn" data-a="tower" title="${t('towerArcher')}">🏹<b data-r="tcount">1/${MAX_TOWER_ARCHERS}</b><small data-r="tcost"></small></button>
+      ${b.roadsOn ? `<button class="tbtn" data-a="road" title="${t('road')}"><span>🛣️</span><b data-r="roadlbl">${t('roadAuto')}</b></button>` : ''}
+      ${b.cmds.some((c) => c.ally) ? `<button class="tbtn ally-power" data-a="allypower" title="${t('allyPower')}"><span data-r="apico">${ROLES[b.cmds.find((c) => c.ally)!.faction]?.icon ?? '🤝'}</span><b>${t('allyPower')}</b></button>` : ''}
       <button class="tbtn" data-a="formation" title="${t('formation')}"><span data-r="fico">⚖️</span><b data-r="flbl">${t('f_line')}</b></button>
       <button class="cbtn" data-a="ctrl" title="${t('control')}">🎯</button>
       <div class="modes">
@@ -1186,6 +1214,12 @@ function buildHud() {
     if (!btn || !battle) return;
     e.preventDefault(); battle.toggleRepeat(btn.dataset.u as EnemyId);
   });
+  el.querySelector('[data-a="road"]')?.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); if (!battle) return;
+    battle.roadChoice = battle.roadChoice === 'auto' ? 0 : battle.roadChoice === 0 ? 1 : 'auto';
+    $(el, '[data-r="roadlbl"]').textContent = t(battle.roadChoice === 'auto' ? 'roadAuto' : battle.roadChoice === 0 ? 'roadN' : 'roadS'); sfx('click');
+  });
+  el.querySelector('[data-a="allypower"]')?.addEventListener('pointerdown', (e) => { e.preventDefault(); const c = battle?.cmds.find((k) => k.ally); if (c && battle?.usePower(c)) buzz(40); });
   const fb = $(el, '[data-a="formation"]');
   const FICO: Record<string, string> = { line: '⚖️', wedge: '🔺', wall: '🧱', skirmish: '🏹' };
   fb.addEventListener('pointerdown', (e) => {
@@ -1297,7 +1331,8 @@ function updateHud() {
   const s = Math.floor(b.time);
   r.time.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const cd = document.querySelector('[data-r="countdown"]');
-  if (cd && b.level.winAfter) cd.textContent = num(Math.max(0, Math.ceil(b.level.winAfter - b.time)));
+  const lim = b.level.winAfter ?? b.level.war?.timeLimit;
+  if (cd && lim) { const left = Math.max(0, Math.ceil(lim - b.time)); cd.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; cd.classList.toggle('hurry', left <= 20); }
   const wv = document.querySelector('[data-r="wave"]');
   if (wv) wv.textContent = num(b.survivalWave);
   // boss health bar
@@ -1343,6 +1378,8 @@ function updateHud() {
     (btn.querySelector('.prog') as HTMLElement).style.height = head && head.id === id ? `${(1 - head.left / b.trainTime(id)) * 100}%` : '0';
   }
   r.ability.style.setProperty('--p', `${b.ability * 100}%`);
+  const ap = document.querySelector<HTMLElement>('[data-a="allypower"]');
+  if (ap) { const c = b.cmds.find((k) => k.ally); const p2 = c?.alive ? c.power : 0; ap.style.setProperty('--p', `${p2 * 100}%`); ap.classList.toggle('ready', p2 >= 1); }
   r.ability.classList.toggle('ready', b.ability >= 1);
   const ctrlOn = !!b.controlled;
   r.ctrl.classList.toggle('on', ctrlOn);
@@ -1644,6 +1681,17 @@ function onSpecialWin(b: Battle) {
     if (first) save.conquest[fid] = k;
     if (first && k === CONQUEST_BATTLES) setTimeout(() => toast(`<span class="toast-ico">🛡️</span><div><b>${t('armyUnlocked')}</b><div>${tk('f_' + fid)}</div></div>`), 600);
     gold = Math.round(L.reward * (first ? 1 : 0.6));
+  } else if (L.war?.mode === 'blitz') {
+    const key = L.id!.slice('blitz-'.length); // "<boss>-<ally>"
+    const best = save.war.blitzBest ?? (save.war.blitzBest = {});
+    const first = best[key] === undefined;
+    const record = first || b.time < best[key];
+    if (record) best[key] = Math.round(b.time);
+    const stars = b.stars(true);
+    gold = Math.round(L.reward * (0.6 + stars * 0.2));
+    gems = (first ? 20 : 0) + (record && !first ? 5 : 0) + (save.war.firstWin.blitz !== todayStr() ? 20 : 0);
+    save.war.firstWin.blitz = todayStr();
+    setTimeout(() => toast(`<span class="toast-ico">⏱️</span><div><b>${'★'.repeat(stars)} ${Math.floor(b.time / 60)}:${String(Math.floor(b.time % 60)).padStart(2, '0')}</b>${record ? `<div>${t('newBest')}</div>` : ''}</div>`), 500);
   } else if (L.kind === 'war') {
     const [mode, ts] = L.id!.split('-');
     const key = L.id!;
@@ -1718,4 +1766,4 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();
 });
 // Dev-only hook for automated UI tests.
-if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, conquestLevel, factionById, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges, offlineTreasury };
+if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, conquestLevel, factionById, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges, offlineTreasury, blitzLevel };

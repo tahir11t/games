@@ -281,6 +281,38 @@ Also new:
 
 To turn the leaderboard on in production: enable **anonymous sign-ins** (see below), then apply the v1.1 migration.
 
+## v1.3: roads, nation roles, Boss Blitz
+
+### Two roads in every Nations War battle
+- The battlefield has a **north road** (back) and a **south road** (front). Soldiers fight only foes on their own road. Flyers cross between roads; fort archers and sky abilities hit both.
+- **Three Kingdoms:** the north road runs straight from your fort to the right fort and bypasses the citadel. The citadel stands on the south road.
+- **2 vs 2:** each enemy nation marches on its own road. Your ally sends troops to the road under the most pressure.
+- **Allied Raid:** the Ember King comes down the south road and his horde down the north road.
+- **🛣️ HUD button:** new soldiers go to Auto (the busier road), North or South.
+
+### A role and a power for every nation (`ROLES` in `src/game/battle.ts`)
+Each power charges over about 48 s. AI nations use theirs automatically. You trigger your ally's power from the HUD button (🌿/👻/🧟/⚒️/🗻 "Ally power"). Powers appear in a small battle feed at the side.
+
+| Nation | Role | Trait | Power |
+|---|---|---|---|
+| Desert (you) | Traders | +12% gold | your commander ability |
+| Elves | Wardens | ranged +15% range | Grove's Blessing: heal the whole army 30% |
+| Ghosts | Phantoms | +12% speed, 10% dodge | Haunting: slow the busiest road 40% for 6 s |
+| Zombies | Swarm | units 20% cheaper | Rise of the Dead: 5 zombies at the front |
+| Dwarves | Siege Masters | +50% damage to forts | Cannon Barrage: 9 shells |
+| Giants | Titans | +20% unit health | Avalanche: stun and hurt the enemy front |
+
+The war screen shows each nation's role, and a table explains all of them.
+
+### Boss Blitz (⏱️, on the Nations War screen)
+- Two minutes to beat a boss you pick: the Ember King, the Warlord, the Elf Queen, the Ghost King, the Plague Lord, the Dwarf King or the Giant King.
+- Fight **alone** or **with an allied nation**. With an ally the boss has more health, and your ally can use its power.
+- The boss charges at once with a small escort, and you start with 850 gold.
+- Stars by time: ★★★ within 1:00, ★★ within 1:30, ★ within 2:00. Best times are saved per boss and per solo/ally.
+- Every boss gets a comparable health pool tuned for the time limit (`BLITZ_BOSSES` / `BLITZ` in `src/data/war.ts`).
+
+Balance (`npx tsx scripts/war.ts`, level 30): Three Kingdoms ≈ 90/70/30%, 2 vs 2 ≈ 100/70/70%, Raid ≈ 100/70/60% (tiers ★/★★/★★★). Boss Blitz ≈ 60–90% for most bosses, 75–100 s. Classic modes are unchanged: roads and roles only switch on in Nations War.
+
 ## v1.2: Nations War, daily and weekly quests, four extras
 
 ### Nations War (Modes → 🌐)

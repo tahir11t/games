@@ -42,7 +42,7 @@ const BOND_ALIAS: Partial<Record<EnemyId, UnitId>> = {
 export const WELL_X = W / 2;
 export const WELL_R = 140;
 export type DropKind = 'gold' | 'charge' | 'heal';
-export interface SupplyDrop { x: number; y: number; kind: DropKind; life: number; landed: boolean; }
+export interface SupplyDrop { x: number; y: number; kind: DropKind; life: number; landed: boolean; road: number; }
 export type Side = 0 | 1;
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -85,6 +85,8 @@ export interface Unit {
   stompCd: number;
   auraCd: number;
   nation: number; // owner: 0 = the player, 1 = the classic enemy, 2+ = Nations War commanders
+  road: number; // Nations War roads: 0 = north (back), 1 = south (front); always 0 elsewhere
+  slow: number; // seconds slowed by a power (Haunting)
   face?: number; // facing (±1) when it can differ from the side (Nations War)
   dmgText?: FloatText; // merges rapid hits into one rising number
 }
@@ -99,6 +101,8 @@ export interface Projectile {
   src?: Unit;
   air: boolean; // can hit flying units on a ground impact
   nation?: number; // owner nation (defaults to side)
+  fortMult?: number; // Siege role bonus against forts
+  road?: number; // road it was fired on (unset: hits every road, e.g. towers and sky abilities)
   pierce?: boolean;
 }
 
@@ -123,6 +127,7 @@ export interface BattleEvents {
   onSpawn?(id: EnemyId, side: Side): void;
   onEliminated?(nation: number): void;
   onBoss?(id: EnemyId): void;
+  onPower?(nation: number, power: PowerId): void;
 }
 
 export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId; extra?: EnemyId[] };
@@ -136,7 +141,22 @@ const DEFAULT_PERKS: BattlePerks = {
 
 let UID = 1;
 const WAR_ARMY_CAP = 26;
-export interface WarCmd { nation: number; side: Side; castle: number; pool: EnemyId[]; gold: number; income: number; stat: number; queue: QueueItem[]; mode: Mode; think: number; target: EnemyId | null; focus: number; focusT: number; alive: boolean; ally: boolean; color: string; faction: string; attackSize: number; }
+/** Nations War roads: vertical offsets of the north (back) and south (front) roads. */
+export const ROAD_Y = [-46, 12];
+export const CITADEL_ROAD = 1;
+/** Nation roles in Nations War: a passive trait and a power that charges during battle. */
+export interface NationRole { icon: string; power: PowerId; hp?: number; range?: number; speed?: number; dodge?: number; fort?: number; cheap?: number; gold?: number; }
+export type PowerId = 'command' | 'bless' | 'haunt' | 'rise' | 'barrage' | 'avalanche';
+export const ROLES: Record<string, NationRole> = {
+  desert: { icon: '🐪', power: 'command', gold: 1.12 }, // Traders: richer mines
+  elves: { icon: '🌿', power: 'bless', range: 1.15 }, // Wardens: longer range · heal the whole army
+  ghosts: { icon: '👻', power: 'haunt', speed: 1.12, dodge: 0.1 }, // Phantoms: fast and evasive · slow a road
+  zombies: { icon: '🧟', power: 'rise', cheap: 0.8 }, // Swarm: cheaper units · raise a horde
+  dwarves: { icon: '⚒️', power: 'barrage', fort: 1.5 }, // Siege: hit forts harder · cannon barrage
+  giants: { icon: '🗻', power: 'avalanche', hp: 1.2 }, // Titans: tougher · stunning avalanche
+};
+export const POWER_CHARGE = 48; // seconds for a nation power to charge
+export interface WarCmd { power: number; road: number; nation: number; side: Side; castle: number; pool: EnemyId[]; gold: number; income: number; stat: number; queue: QueueItem[]; mode: Mode; think: number; target: EnemyId | null; focus: number; focusT: number; alive: boolean; ally: boolean; color: string; faction: string; attackSize: number; }
 const PERFECT_EARLY = 0.12, PERFECT_LATE = 0.3, PERFECT_BONUS = 1.6;
 const WELL_GOLD = 5, WELL_HEAL = 0.012; // gold per 3 s, share of max HP per second
 const DROP_GOLD = 120;
@@ -252,7 +272,7 @@ export class Battle {
   get playerArmy() { return this.units.filter((u) => u.side === 0 && !u.dead); }
   get enemyStat() { return this.level.enemyMult * this.diff.stat; }
   goldMult(side: Side) {
-    return MINE_YIELD[this.mineLevel[side] - 1] * (this.rush > 0 ? 2 : 1) * (side === 0 ? (this.level.mods?.goldMult ?? 1) * passiveFx.mining(this.perks.passives.mining) * this.cards.gold : (this.level.ai?.income ?? 1) * this.diff.income);
+    return MINE_YIELD[this.mineLevel[side] - 1] * (this.rush > 0 ? 2 : 1) * (side === 0 && this.multi ? this.roleFor(0).gold ?? 1 : 1) * (side === 0 ? (this.level.mods?.goldMult ?? 1) * passiveFx.mining(this.perks.passives.mining) * this.cards.gold : (this.level.ai?.income ?? 1) * this.diff.income);
   }
   minerCount(side: Side = 0) {
     const q = side === 0 ? this.queue : this.equeue;
@@ -267,7 +287,7 @@ export class Battle {
     if (!this.allowed) return true;
     return this.allowed.includes((this.roles[id] ?? id) as UnitId);
   }
-  costOf(id: EnemyId) { return UNITS[id].cost || armyCost(id); }
+  costOf(id: EnemyId) { const c = UNITS[id].cost || armyCost(id); return this.multi ? Math.round(c * (this.roleFor(0).cheap ?? 1)) : c; }
   trainTime(id: EnemyId) { return UNITS[id].train || armyTrain(id); }
 
   canTrain(id: EnemyId) {
@@ -296,7 +316,7 @@ export class Battle {
     const dmgMod = side === 1 ? this.level.mods?.enemyDmg ?? 1 : mine && def.ranged ? passiveFx.eagle(this.perks.passives.eagle) : 1;
     const u: Unit = {
       uid: UID++, def, side,
-      x: nation >= 2 ? this.spawnX(nation) : CASTLE_X[side] + (side === 0 ? 40 : -40), nation,
+      x: nation >= 2 ? this.spawnX(nation) : CASTLE_X[side] + (side === 0 ? 40 : -40), nation, road: 0, slow: 0,
       lane: (Math.random() - 0.5) * 30,
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
@@ -304,6 +324,11 @@ export class Battle {
       summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0, auraCd: def.healAura?.every ?? 0, carry: 0, tripT: 0, hidden: false,
       tier: mine ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
+    if (this.multi) {
+      const r = this.roleFor(nation);
+      if (r.hp) { u.hp *= r.hp; u.maxHp *= r.hp; }
+      u.road = this.pickRoad(nation, def);
+    }
     this.units.push(u);
     this.ev.onSpawn?.(id, side);
     return u;
@@ -379,14 +404,15 @@ export class Battle {
     if (this.dropNext <= 0 && !this.over) {
       this.dropNext = 48 + Math.random() * 22;
       const kinds: DropKind[] = ['gold', 'charge', 'heal'];
-      this.drops.push({ x: W * (0.36 + Math.random() * 0.28), y: -40, kind: kinds[Math.floor(Math.random() * 3)], life: 26, landed: false });
+      this.drops.push({ x: W * (0.36 + Math.random() * 0.28), y: -40, kind: kinds[Math.floor(Math.random() * 3)], life: 26, landed: false, road: this.roadsOn ? Math.floor(Math.random() * 2) : 0 });
     }
     for (const d of this.drops) {
       d.life -= dt;
-      if (!d.landed) { d.y += 120 * dt; if (d.y >= GROUND - 10) { d.y = GROUND - 10; d.landed = true; this.dust(d.x, GROUND - 4, '#d9c08a', 5); } continue; }
+      const dg = GROUND + (this.roadsOn ? ROAD_Y[d.road] : 0);
+      if (!d.landed) { d.y += 120 * dt; if (d.y >= dg - 10) { d.y = dg - 10; d.landed = true; this.dust(d.x, dg - 4, '#d9c08a', 5); } continue; }
       let taker: Unit | null = null, bd = 24;
       for (const u of this.units) {
-        if (u.dead || u.def.miner || u.def.flying || u.hidden) continue;
+        if (u.dead || u.def.miner || u.def.flying || u.hidden || (this.roadsOn && u.road !== d.road)) continue;
         const dd = Math.abs(u.x - d.x);
         if (dd < bd) { bd = dd; taker = u; }
       }
@@ -563,6 +589,7 @@ export class Battle {
       u.attacking = Math.max(0, u.attacking - dt);
       u.hitFlash = Math.max(0, u.hitFlash - dt);
       u.healFx = Math.max(0, u.healFx - dt);
+      if (u.slow > 0) u.slow -= dt;
       if (u.stun > 0) { u.stun -= dt; u.moving = false; u.attacking = 0; continue; }
       if (u.def.stomp) {
         u.stompCd -= dt;
@@ -591,7 +618,7 @@ export class Battle {
           u.summonCd = u.def.summon.every;
           if (this.armyCount(u.side) < MAX_ARMY) {
             const m = this.spawn(u.def.summon.unit, u.side, this.multi ? this.statOf(u) : u.side === 1 ? this.enemyStat : 1, u.nation);
-            m.x = u.x + this.facing(u) * 20;
+            m.x = u.x + this.facing(u) * 20; m.road = u.road;
             for (let i = 0; i < 6; i++) this.dust(m.x, GROUND - 10, '#7a6a55', 4);
           }
         }
@@ -831,7 +858,10 @@ export class Battle {
   bossEnraged = false;
 
   /** Enemies? Different sides always; in a free-for-all, also different nations on the same side. */
-  hostile(a: Unit, b: Unit) { return a.side !== b.side || (this.multi && !!this.level.war?.ffa && a.nation !== b.nation); }
+  hostile(a: Unit, b: Unit) {
+    if (!(a.side !== b.side || (this.multi && !!this.level.war?.ffa && a.nation !== b.nation))) return false;
+    return !this.roadsOn || a.road === b.road || a.def.flying || b.def.flying; // soldiers only meet foes on their own road
+  }
   hostileTo(side: Side, nation: number, b: { side: Side; nation: number }) { return side !== b.side || (this.multi && !!this.level.war?.ffa && nation !== b.nation); }
   cmdOf(u: Unit) { return u.nation >= 2 ? this.cmds.find((c) => c.nation === u.nation) : undefined; }
   /** Stat multiplier a unit's own summons and blasts use. */
@@ -848,7 +878,8 @@ export class Battle {
   /** Castle slot a unit is marching on: the opposite fort, or (Nations War) its commander's chosen target. */
   targetCastle(u: Unit): number {
     if (!this.multi) return u.side === 0 ? 1 : 0;
-    const alive = (i: number) => this.castleMax[i] > 0 && (this.castleHp[i] > 0 || !isFinite(this.castleHp[i])) && this.hostileTo(u.side, u.nation, this.castleOwner[i]);
+    const alive = (i: number) => this.castleMax[i] > 0 && (this.castleHp[i] > 0 || !isFinite(this.castleHp[i])) && this.hostileTo(u.side, u.nation, this.castleOwner[i])
+      && (i !== 2 || !this.roadsOn || u.road === CITADEL_ROAD || u.def.flying); // the citadel stands on the south road
     const cmd = this.cmdOf(u);
     if (cmd && !cmd.ally && cmd.focus >= 0 && alive(cmd.focus)) return cmd.focus;
     let best = -1, bd = Infinity;
@@ -874,14 +905,94 @@ export class Battle {
     for (const c of live) c.gold += n / live.length;
   }
 
+  roadsOn = false;
+  roadChoice: 'auto' | 0 | 1 = 'auto'; // where the player's new soldiers march
+  private roadFlip = 0;
+  /** The role of a nation: the player's army civilization, or the commander's. */
+  roleFor(nation: number): NationRole {
+    if (nation === 0) return ROLES[this.perks.army ?? 'desert'] ?? ROLES.desert;
+    return ROLES[this.cmds.find((c) => c.nation === nation)?.faction ?? 'desert'] ?? ROLES.desert;
+  }
+  /** Road for a new soldier: the player's choice (or the busier road), a commander's plan, or road 0 outside Nations War. */
+  private pickRoad(nation: number, def: UnitDef): number {
+    if (!this.roadsOn) return 0;
+    const threat = (r: number, sideOf: Side) => this.units.filter((u) => !u.dead && u.side !== sideOf && u.road === r && !u.def.miner).length;
+    if (nation === 0) {
+      if (def.miner) return 1;
+      if (this.roadChoice !== 'auto') return this.roadChoice;
+      const a = threat(0, 0), b = threat(1, 0);
+      if (a !== b) return a > b ? 0 : 1;
+      return (this.roadFlip++) % 2;
+    }
+    const c = this.cmds.find((k) => k.nation === nation);
+    if (!c) return 1;
+    if (c.ally) { const a = threat(0, c.side), b = threat(1, c.side); return a === b ? (this.roadFlip++) % 2 : a > b ? 0 : 1; }
+    if (this.level.war?.ffa) {
+      if (c.castle === 2) return Math.random() < 0.7 ? CITADEL_ROAD : 0; // the citadel guards its own road first
+      return c.focus === 2 ? CITADEL_ROAD : c.focus === 0 ? (Math.random() < 0.75 ? 0 : 1) : (this.roadFlip++) % 2;
+    }
+    return c.road >= 0 ? c.road : (this.roadFlip++) % 2;
+  }
+  /** A nation power: AI nations use theirs when charged; the player calls the ally's from the HUD. */
+  usePower(c: WarCmd) {
+    if (!c.alive || c.power < 1) return false;
+    const role = this.roleFor(c.nation);
+    const foes = this.units.filter((u) => !u.dead && !u.def.miner && this.hostileTo(c.side, c.nation, u));
+    const mine = this.units.filter((u) => !u.dead && u.nation === c.nation && !u.def.miner);
+    if (role.power !== 'bless' && role.power !== 'rise' && !foes.length) return false;
+    c.power = 0;
+    const centre = (list: Unit[]) => list.reduce((a, u) => a + u.x, 0) / Math.max(1, list.length);
+    switch (role.power) {
+      case 'bless':
+        for (const u of mine) { u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.3); u.healFx = 1; }
+        for (let i = 0; i < 14; i++) this.dust(centre(mine) + (Math.random() - 0.5) * 300, GROUND - 30, '#9dff9a', 4);
+        break;
+      case 'haunt': {
+        const road = [0, 1].sort((a, z) => foes.filter((u) => u.road === z).length - foes.filter((u) => u.road === a).length)[0];
+        for (const u of foes) if (!this.roadsOn || u.road === road || u.def.flying) u.slow = 6;
+        break;
+      }
+      case 'rise': {
+        const lead = mine.sort((a, z) => this.facing(z) * z.x - this.facing(a) * a.x)[0];
+        for (let i = 0; i < 5 && this.units.filter((u) => u.nation === c.nation && !u.dead).length < WAR_ARMY_CAP + 5; i++) {
+          const z = this.spawn('zombie', c.side, c.stat, c.nation); z.x = (lead?.x ?? castleX(c.castle)) + (Math.random() - 0.5) * 60; if (lead) z.road = lead.road;
+          this.dust(z.x, GROUND - 10, '#7dff5c', 4);
+        }
+        break;
+      }
+      case 'barrage': {
+        const tx = centre(foes);
+        for (let i = 0; i < 9; i++) this.rainFrom(c.side, c.nation, tx - 140 + Math.random() * 280, 45 * c.stat, 50, 'rock', i * 0.12);
+        break;
+      }
+      case 'avalanche': {
+        const tx = centre(foes);
+        for (const u of foes) if (Math.abs(u.x - tx) < 220 && !u.def.flying) { if (!u.def.boss) u.stun = Math.max(u.stun, 1.6); this.applyDamage(u, 35 * c.stat, true); }
+        for (let i = 0; i < 20; i++) this.dust(tx + (Math.random() - 0.5) * 440, GROUND - 40 - Math.random() * 60, '#e8f4ff', 6);
+        this.shake = Math.min(1, this.shake + 0.4);
+        break;
+      }
+      default: return false;
+    }
+    sfx('volley');
+    this.ev.onPower?.(c.nation, role.power);
+    return true;
+  }
+  /** Sky strike owned by any side/nation (powers). */
+  private rainFrom(side: Side, nation: number, x: number, dmg: number, splash: number, kind: Projectile['kind'], delay = 0) {
+    const sx = x + (side === 0 ? -220 : 220), sy = -60 - Math.random() * 120;
+    this.projectiles.push({ x: sx, y: sy, vx: 0, vy: 0, sx, sy, tx: x, ty: GROUND - 8, t: -delay, T: 0.8, arc: -20, side, dmg, splash, kind, air: true, nation });
+  }
+
   private initWar(w: WarSpec) {
     this.multi = true;
+    this.roadsOn = !!w.roads;
     this.waveIdx = Infinity; // no scripted waves
     w.nations.forEach((n, i) => {
       const nation = i + 2;
       const f = factionById(n.faction);
       this.cmds.push({ nation, side: n.side, castle: n.castle, pool: [...f.pool, f.special], gold: n.startGold, income: n.income * this.diff.income, stat: n.stat * this.diff.stat,
-        queue: [], mode: 'defend', think: Math.random(), target: null, focus: -1, alive: true, ally: !!n.ally, color: n.color, faction: n.faction, attackSize: 5 + Math.floor(Math.random() * 3), focusT: 0 });
+        power: 0.2 + Math.random() * 0.2, road: n.road ?? -1, queue: [], mode: 'defend', think: Math.random(), target: null, focus: -1, alive: true, ally: !!n.ally, color: n.color, faction: n.faction, attackSize: 5 + Math.floor(Math.random() * 3), focusT: 0 });
       if (n.castle >= 1) this.castleOwner[n.castle] = { side: n.side, nation };
     });
     if (this.castleMax[2] > 0) this.towerArchers[2] = (this.level.towerDmg ?? 0) > 0 ? 1 : 0;
@@ -895,6 +1006,8 @@ export class Battle {
       const bc = this.cmds.find((c) => !c.ally && c.side === 1);
       const b = this.spawn(w.boss, 1, (bc?.stat ?? 1) * (w.bossMult ?? 1), bc?.nation ?? 1);
       this.bossUnit = b;
+      if (this.roadsOn) b.road = CITADEL_ROAD; // the boss marches down the south road
+      if (w.bossDmg) b.dmg *= w.bossDmg;
       this.fx.push({ kind: 'pillar', x: b.x, y: GROUND, f: -1, life: 1.2, max: 1.2 }, { kind: 'ring', x: b.x, y: GROUND, f: -1, life: 0.9, max: 0.9 });
       this.shake = Math.min(1, this.shake + 0.6); sfx('boom');
       this.ev.onBoss?.(w.boss);
@@ -907,7 +1020,9 @@ export class Battle {
     }
     for (const c of this.cmds) {
       if (!c.alive) continue;
-      c.gold += c.income * dt;
+      c.power = Math.min(1, c.power + dt / POWER_CHARGE);
+      if (c.power >= 1 && !c.ally && this.time > (w.grace ?? 28)) this.usePower(c);
+      c.gold += c.income * dt * (this.roleFor(c.nation).gold ?? 1);
       if (c.queue.length) {
         c.queue[0].left -= dt;
         if (c.queue[0].left <= 0) { const it = c.queue.shift()!; this.spawn(it.id, c.side, c.stat, c.nation); }
@@ -929,13 +1044,15 @@ export class Battle {
         }
         let pick = c.target;
         if (pick && costOf(pick) > c.gold && (mine.length < 4 || c.gold < costOf(pick) * 0.4) && c.gold >= 50) pick = c.pool.filter((id) => costOf(id) <= c.gold).sort((a, z) => costOf(z) - costOf(a))[0] ?? pick;
-        if (pick && costOf(pick) <= c.gold) {
-          c.gold -= costOf(pick);
+        const cheap = this.roleFor(c.nation).cheap ?? 1;
+        if (pick && costOf(pick) * cheap <= c.gold) {
+          c.gold -= costOf(pick) * cheap;
           c.queue.push({ id: pick, left: Math.max(2, UNITS[pick].train || costOf(pick) / 50) });
           if (pick === c.target) c.target = null;
         }
       }
       if (c.ally) { c.mode = this.mode; continue; } // allies follow your orders
+      if (w.timeLimit) { c.mode = 'attack'; c.focus = 0; continue; } // Boss Blitz: the boss and his escort charge at once
       // target: the weakest hostile fort (re-chosen every 20 s in a free-for-all)
       c.focusT -= 0.9;
       const live = (i: number) => this.castleMax[i] > 0 && (this.castleHp[i] > 0 || !isFinite(this.castleHp[i])) && this.hostileTo(c.side, c.nation, this.castleOwner[i]);
@@ -958,6 +1075,7 @@ export class Battle {
   private checkWar() {
     const w = this.level.war!;
     if (this.castleHp[0] <= 0) { this.finish(false); return; }
+    if (w.timeLimit && this.time >= w.timeLimit && !(this.bossUnit?.dead)) { this.finish(false); return; } // Boss Blitz: out of time
     for (const slot of [1, 2]) {
       if (this.castleMax[slot] <= 0 || !isFinite(this.castleHp[slot]) || this.castleHp[slot] > 0) continue;
       for (const c of this.cmds) {
@@ -1088,11 +1206,13 @@ export class Battle {
       if (!u.def.ranged && !u.def.miner) { if (this.formation === 'wedge') s *= 1.12; else if (this.formation === 'wall') s *= 0.82; }
     }
     if (this.bondOf(u) === 'charge') s *= 1.06;
+    if (this.multi) { s *= this.roleFor(u.nation).speed ?? 1; if (u.slow > 0) s *= 0.6; }
     for (const a of this.auras) if (a.def.support && a.side === u.side && !this.hostile(a, u) && a !== u && Math.abs(a.x - u.x) < 160) { s *= 1.15; break; }
     return s;
   }
 
   private rangeOf(u: Unit) {
+    if (this.multi && u.def.ranged) { const rr = this.roleFor(u.nation).range ?? 1; if (u.nation !== 0) return u.def.range * rr; return u.def.range * rr * passiveFx.eagle(this.perks.passives.eagle) * (this.formation === 'skirmish' ? 1.15 : 1); }
     if (u.side !== 0 || u.nation !== 0 || !u.def.ranged) return u.def.range;
     return u.def.range * passiveFx.eagle(this.perks.passives.eagle) * (this.formation === 'skirmish' ? 1.15 : 1);
   }
@@ -1192,7 +1312,7 @@ export class Battle {
     if (u.def.flying || u === this.controlled || u.def.miner) { u.x += dx; return; }
     const dir = Math.sign(dx);
     for (const o of this.units) {
-      if (o === u || o.dead || o.side !== u.side || this.hostile(u, o) || o.def.flying || o.def.miner) continue;
+      if (o === u || o.dead || o.side !== u.side || this.hostile(u, o) || o.road !== u.road || o.def.flying || o.def.miner) continue;
       const ahead = (o.x - u.x) * dir;
       const minD = Math.min(22, (u.def.height + o.def.height) * 0.14);
       if (ahead <= 0 || ahead > minD || Math.abs(o.lane - u.lane) > 8) continue;
@@ -1271,13 +1391,15 @@ export class Battle {
     }
   }
 
+  /** Ground line a unit stands on (its road's offset plus its lane jitter). */
+  groundY(u: Unit) { return GROUND + u.lane + (this.roadsOn ? ROAD_Y[u.road] : 0); }
   unitY(u: Unit) {
-    return GROUND + u.lane - (u.def.flying ? FLY_HEIGHT + Math.sin(u.anim * 0.6) * 8 : 0);
+    return this.groundY(u) - (u.def.flying ? FLY_HEIGHT + Math.sin(u.anim * 0.6) * 8 : 0);
   }
 
   private hitCastle(u: Unit, side: number, mult: number) {
     if (!isFinite(this.castleHp[side])) return;
-    const dmg = u.dmg * mult * this.outMult(u) * (u.def.id === 'catapult' ? 2 : 1);
+    const dmg = u.dmg * mult * this.outMult(u) * (u.def.id === 'catapult' ? 2 : 1) * (this.multi ? this.roleFor(u.nation).fort ?? 1 : 1);
     this.castleHp[side] = Math.max(0, this.castleHp[side] - dmg);
     this.shake = Math.min(0.4, this.shake + 0.05);
     sfx('hit');
@@ -1297,7 +1419,7 @@ export class Battle {
     const d = Math.abs(foe.x - u.x);
     const T = kind === 'bolt' ? Math.max(0.2, d / 900) : Math.max(0.3, d / 560);
     const arc = kind === 'bolt' ? 8 : kind === 'rock' ? 90 + d * 0.15 : 25 + d * 0.12;
-    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx: foe.x, ty, t: 0, T, arc, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, bonusVs: u.def.bonusVs, target: kind === 'rock' ? undefined : foe, src: u, air: kind !== 'rock', pierce: u.def.pierce, nation: u.nation });
+    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx: foe.x, ty, t: 0, T, arc, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, bonusVs: u.def.bonusVs, target: kind === 'rock' ? undefined : foe, src: u, air: kind !== 'rock', pierce: u.def.pierce, nation: u.nation, road: this.roadsOn && !u.def.flying ? u.road : undefined });
     sfx(kind === 'rock' ? 'throw' : 'arrow');
   }
 
@@ -1306,19 +1428,19 @@ export class Battle {
     const sy = this.unitY(u) - u.def.height * 0.8;
     const tx = castleX(side) + (side === 0 ? 40 : side === 1 ? -40 : Math.sign(u.x - CITADEL_X) * 40);
     const d = Math.abs(tx - u.x);
-    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx, ty: GROUND - 70, t: 0, T: Math.max(0.3, d / 560), arc: kind === 'bolt' ? 8 : 40 + d * 0.15, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, castle: side, src: u, air: false, nation: u.nation });
+    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx, ty: GROUND - 70, t: 0, T: Math.max(0.3, d / 560), arc: kind === 'bolt' ? 8 : 40 + d * 0.15, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, castle: side, src: u, air: false, nation: u.nation, fortMult: this.multi ? this.roleFor(u.nation).fort ?? 1 : 1 });
     sfx(kind === 'rock' ? 'throw' : 'arrow');
   }
 
   private impact(p: Projectile) {
     const foeSide: Side = p.side === 0 ? 1 : 0;
     const pn = p.nation ?? p.side;
-    const isFoe = (o: Unit) => this.hostileTo(p.side, pn, o);
+    const isFoe = (o: Unit) => this.hostileTo(p.side, pn, o) && (p.road === undefined || !this.roadsOn || o.road === p.road || o.def.flying);
     this.hitBy = pn;
     const x = p.x;
     if (p.castle !== undefined) {
       if (isFinite(this.castleHp[p.castle])) {
-        this.castleHp[p.castle] = Math.max(0, this.castleHp[p.castle] - p.dmg * (p.kind === 'rock' ? 2 : 0.6));
+        this.castleHp[p.castle] = Math.max(0, this.castleHp[p.castle] - p.dmg * (p.kind === 'rock' ? 2 : 0.6) * (p.fortMult ?? 1));
         this.shake = Math.min(0.5, this.shake + (p.kind === 'rock' ? 0.15 : 0.03));
       }
       this.dust(x, p.y, '#c9a26a', p.kind === 'rock' ? 8 : 3);
@@ -1391,7 +1513,8 @@ export class Battle {
   }
 
   private applyDamage(o: Unit, dmg: number, isSplash = false, src?: Unit) {
-    if (o.def.dodge && !isSplash && Math.random() < o.def.dodge) {
+    const dodge = (o.def.dodge ?? 0) + (this.multi ? this.roleFor(o.nation).dodge ?? 0 : 0);
+    if (dodge && !isSplash && Math.random() < dodge) {
       this.texts.push({ x: o.x, y: this.unitY(o) - o.def.height - 8, text: '~', life: 0.5, color: '#fff' });
       return;
     }
@@ -1443,7 +1566,7 @@ export class Battle {
         const lich = this.units.find((v) => v.def.raiseDead && !v.dead && this.hostile(v, o) && Math.abs(v.x - o.x) < 280);
         if (lich && this.armyCount(lich.side) < MAX_ARMY) {
           const z = this.spawn(lich.def.raiseDead!, lich.side, this.multi ? this.statOf(lich) : lich.side === 1 ? this.enemyStat : 1, lich.nation);
-          z.x = o.x; z.lane = o.lane;
+          z.x = o.x; z.lane = o.lane; z.road = o.road;
           for (let i = 0; i < 8; i++) this.dust(o.x, GROUND - 10, '#7dff5c', 4);
         }
       }
@@ -1494,6 +1617,8 @@ export class Battle {
 
   stars(win: boolean) {
     if (!win) return 0;
+    const tl = this.level.war?.timeLimit;
+    if (tl) return this.time <= tl * 0.5 ? 3 : this.time <= tl * 0.75 ? 2 : 1; // Boss Blitz: faster = more stars
     let s = 1;
     if (this.castleHp[0] / this.castleMax[0] > 0.5) s++;
     if (this.time < 180) s++;

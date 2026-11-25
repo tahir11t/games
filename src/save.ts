@@ -50,7 +50,7 @@ export interface SaveData {
   a11y: { colorblind: boolean; calm: boolean };
   dq: { date: string; c: Record<string, number>; claimed: string[]; swapped: string[] }; // daily quests (v1.2)
   wq: { week: string; c: Record<string, number>; claimed: string[]; bonus: boolean }; // weekly quests
-  war: { won: Record<string, number>; firstWin: Record<string, string> }; // Nations War: wins per mode-tier, last daily first-win date
+  war: { won: Record<string, number>; firstWin: Record<string, string>; blitzBest?: Record<string, number> }; // Nations War: wins per mode-tier, last daily first-win date, Boss Blitz best seconds
   idleAt: number; // when the offline treasury was last collected
   updatedAt: number;
 }
@@ -234,7 +234,7 @@ export function track(name: string, params: Record<string, unknown> = {}) {
 export async function flushEvents() {
   if (!sb || !userId || !queue.length) return;
   const batch = queue.splice(0, queue.length).map((e) => ({
-    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.2.0', locale: save.lang,
+    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.3.0', locale: save.lang,
   }));
   const { error } = await sb.from('analytics_events').insert(batch);
   if (error) console.warn('[analytics] flush failed', error.message);
