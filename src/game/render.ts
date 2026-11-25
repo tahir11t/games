@@ -1,4 +1,4 @@
-import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, type Unit, type SupplyDrop } from './battle';
+import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, CITADEL_X, castleX, type Unit, type SupplyDrop } from './battle';
 const LAST_STAND_VIS = 420;
 import type { RegionId } from '../data/levels';
 import { drawArt, glowDot, isLowQuality, shade as shadeHex } from './art';
@@ -102,6 +102,11 @@ export class Renderer {
     this.drawMine(MINE_X[1], b.mineLevel[1], b.rush, time);
     this.drawCastle(0, b.castleHp[0] / b.castleMax[0], b.level.region, false, b, time);
     this.drawCastle(1, isFinite(b.castleHp[1]) ? b.castleHp[1] / b.castleMax[1] : 1, b.level.region, !isFinite(b.castleHp[1]), b, time);
+    if (b.castleMax[2] > 0) { // Nations War: the third nation's citadel in mid-field
+      const cc = b.cmds.find((k) => k.castle === 2);
+      if (b.castleHp[2] > 0 || (cc && cc.alive)) this.drawCastle(1, b.castleHp[2] / b.castleMax[2], b.level.region, false, b, time, { slot: 2, style: cc?.faction ?? 'desert', color: a11y.colorblind ? '#8a5cd6' : cc?.color ?? '#7a3fb0' });
+      else { c.fillStyle = 'rgba(70,50,30,.55)'; c.beginPath(); c.ellipse(CITADEL_X, GROUND - 4, 110, 16, 0, 0, 7); c.fill(); } // rubble
+    }
 
     // formation marker (a small banner on the ground)
     const markX = b.mode === 'defend' ? CASTLE_X[0] + 220 : b.mode === 'hold' ? b.holdX : -1;
@@ -110,7 +115,7 @@ export class Renderer {
       c.fillStyle = 'rgba(224,168,46,.85)'; c.beginPath(); c.moveTo(markX, GROUND - 46); c.lineTo(markX + 22 + Math.sin(time * 4) * 3, GROUND - 40); c.lineTo(markX, GROUND - 32); c.closePath(); c.fill();
     }
 
-    this.drawWell(b, time);
+    if (!b.level.war?.ffa) this.drawWell(b, time);
     for (const d of b.drops) this.drawDrop(d, time);
 
     this.lastControlled = b.controlled;
@@ -506,9 +511,12 @@ export class Renderer {
     c.fillStyle = '#333'; c.beginPath(); c.arc(x + 26, GROUND - 3, 3, 0, 7); c.arc(x + 38, GROUND - 3, 3, 0, 7); c.fill();
   }
 
-  private drawCastle(side: 0 | 1, pct: number, region: RegionId, invulnerable: boolean, b: Battle, time: number) {
+  private drawCastle(side: 0 | 1, pct: number, region: RegionId, invulnerable: boolean, b: Battle, time: number, slotOpt?: { slot: number; style: string; color: string }) {
     const c = this.ctx;
-    const x = CASTLE_X[side];
+    const slot = slotOpt?.slot ?? side;
+    const x = castleX(slot);
+    const team0 = TEAM[side];
+    if (slotOpt) TEAM[side] = slotOpt.color;
     const f = side === 0 ? 1 : -1;
     const low = isLowQuality();
     const wall = region === 'shadow' ? '#7a7290' : region === 'mountains' ? '#b5a588' : region === 'tombs' ? '#bf9d6e' : region === 'forest' ? '#a88a62' : region === 'graveyard' ? '#7d7f74' : region === 'tundra' ? '#b8c4cc' : '#d4a46a';
@@ -551,7 +559,7 @@ export class Renderer {
       }
     };
 
-    const style = side === 0 ? this.playerArmy : (b.level.faction ?? 'desert');
+    const style = slotOpt?.style ?? (side === 0 ? this.playerArmy : (b.level.faction ?? 'desert'));
     const wx0 = -100, wx1 = 100, wTop = G - 140;
     const tw = 76, tx0 = -f * 82 - tw / 2, tTop = G - 230;
     if (style !== 'desert') this.factionFort(style, side, f, G, wTop, tx0, tw, tTop, time, low);
@@ -626,11 +634,11 @@ export class Renderer {
     // ---- fort archers: tower top + wall posts for extra ones ----
     if (pct > 0) {
       const posts: [number, number][] = [[tx0 + tw / 2, tTop - 6], [f * -20, wTop], [f * 70, wTop]];
-      const atk = b.towerShot[side] > 0 ? Math.sin((1 - b.towerShot[side] / 0.3) * Math.PI) : 0;
-      for (let k = 0; k < b.towerArchers[side]; k++) {
+      const atk = b.towerShot[slot] > 0 ? Math.sin((1 - b.towerShot[slot] / 0.3) * Math.PI) : 0;
+      for (let k = 0; k < b.towerArchers[slot]; k++) {
         const [ax, ay] = posts[k];
         const towerDef = UNITS[({ elves: 'elfarcher', ghosts: 'banshee', zombies: 'skelarcher', dwarves: 'axethrower' } as Record<string, EnemyId>)[style] ?? 'archer'];
-        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 };
+        const a: Unit = { uid: 990 + side * 3 + k, def: towerDef, side, x: ax, lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: k, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier: side === 0 ? Math.min(4, b.perks.passives.towers + 1) : 1 , nation: side };
         c.save(); c.translate(ax, ay); c.scale(0.8, 0.8); c.translate(-ax, -ay - 4);
         drawArt({ c, u: a, x: ax, gy: ay, f, t: time + k, swing: 0, atk, side, region, flash: false, tier: a.tier });
         c.restore();
@@ -661,6 +669,7 @@ export class Renderer {
     c.fillStyle = 'rgba(0,0,0,.55)'; c.beginPath(); c.roundRect(x - bw / 2 - 3, G - 340, bw + 6, 16, 5); c.fill();
     c.fillStyle = invulnerable ? '#a46cff' : pct > 0.5 ? '#5cc85c' : pct > 0.25 ? '#e8b730' : '#e0453a';
     c.beginPath(); c.roundRect(x - bw / 2, G - 337, bw * Math.max(0, pct), 10, 4); c.fill();
+    TEAM[side] = team0;
   }
 
   /** The Oasis Well: palms, a stone well and a banner showing who holds it, with a capture ring. */
@@ -723,9 +732,15 @@ export class Renderer {
     c.font = '14px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText(icon, d.x, d.y - 18);
   }
 
+  /** Ring colour: your army gold, the classic enemy red, each Nations War commander its own banner colour. */
+  private teamColor(u: Unit, b: Battle) {
+    if (u.nation >= 2) { const cmd = b.cmds.find((k) => k.nation === u.nation); if (cmd) return a11y.colorblind && !cmd.ally ? (cmd.castle === 2 ? '#8a5cd6' : '#2f6fd6') : cmd.color; }
+    return TEAM[u.side];
+  }
+
   drawUnit(u: Unit, b: Battle) {
     const c = this.ctx;
-    const f = u.side === 0 ? 1 : -1;
+    const f = u.face ?? (u.side === 0 ? 1 : -1);
     const gy = b.unitY ? b.unitY(u) : GROUND + u.lane;
     const groundY = GROUND + u.lane;
     c.save();
@@ -736,7 +751,7 @@ export class Renderer {
     c.fillStyle = 'rgba(50,28,8,.18)'; c.beginPath(); c.ellipse(u.x - sw * 0.12, groundY + 2, sw, sw * 0.18, 0, 0, 7); c.fill();
     c.fillStyle = 'rgba(30,15,4,.22)'; c.beginPath(); c.ellipse(u.x, groundY + 1, sw * 0.55, sw * 0.1, 0, 0, 7); c.fill();
     // team ring at the feet (sides stay readable even in mirror matches)
-    if (!u.dead) { c.strokeStyle = TEAM[u.side]; c.globalAlpha = 0.55; c.lineWidth = 2; c.beginPath(); c.ellipse(u.x, groundY + 2, Math.min(26, sw * 0.8), Math.min(6, sw * 0.16), 0, 0, 7); c.stroke(); c.globalAlpha = 1; }
+    if (!u.dead) { c.strokeStyle = this.teamColor(u, b); c.globalAlpha = 0.55; c.lineWidth = 2; c.beginPath(); c.ellipse(u.x, groundY + 2, Math.min(26, sw * 0.8), Math.min(6, sw * 0.16), 0, 0, 7); c.stroke(); c.globalAlpha = 1; }
     if (u === b.controlled) {
       c.strokeStyle = 'rgba(255,224,102,.85)'; c.lineWidth = 3; c.beginPath(); c.ellipse(u.x, groundY + 2, 26, 7, 0, 0, 7); c.stroke();
       c.fillStyle = '#ffe066';
@@ -789,7 +804,7 @@ export class Renderer {
     const wide = ['camel', 'cavalry', 'lion', 'hyena', 'scorpking', 'worm', 'catapult', 'boss', 'elephant', 'cobra', 'cobraqueen'].includes(def.id) ? 1.5 : 1;
     const s = size / (Math.max(h * 1.25, 60 * wide) + 12);
     ctx.setTransform(s, 0, 0, s, size / 2 - 60 * s, size - (GROUND + 6) * s);
-    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier };
+    const u: Unit = { uid: 0, def, side, x: 60 - (['camel', 'cavalry', 'elephant'].includes(def.id) ? 10 : 0), lane: 0, hp: 1, maxHp: 1, dmg: 0, cd: 0, anim: 1.2, moving: false, attacking: 0, chargeReady: false, calm: 0, mineTimer: 0, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0, summonCd: 0, stun: 0, stompCd: 0, auraCd: 0, carry: 0, tripT: 0, hidden: false, tier, nation: 0 };
     const y = def.flying ? GROUND - 30 : GROUND;
     drawArt({ c: ctx, u, x: u.x, gy: y, f: side === 0 ? 1 : -1, t: 1, swing: 0, atk: 0, side, region: 'oasis', flash: false, tier });
     return cv.toDataURL();

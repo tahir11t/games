@@ -925,6 +925,27 @@ function drawArtInner(a: ArtCtx) {
       weapon: (hx, hy, ang) => { const b2 = ang - f * 0.8; const ex = hx + Math.cos(b2) * h * 0.42, ey = hy + Math.sin(b2) * h * 0.42; line(c, hx, hy, ex, ey, '#6b4423', 3.5); c.save(); c.translate(ex, ey); c.rotate(b2); c.beginPath(); c.roundRect(-7, -10, 14, 20, 3); fillStroke(c, vgrad(c, '#b8c2cc', -10, 10), 2); c.restore(); if (a.atk > 0.2) glowDot(c, ex, ey, 6, '#bfe8ff'); } });
       return;
     case 'mammoth': return mammoth(a);
+    case 'ifrit': { // the Ember King: molten skin, horns, a crown of flame and a burning greatblade
+      const rage = u.hp < u.maxHp * 0.5;
+      if (!LOW) { c.save(); c.globalCompositeOperation = 'lighter'; for (let i = 0; i < 7; i++) { const ph = t * 3 + i * 0.9; c.fillStyle = `rgba(255,${110 + i * 15},30,${(rage ? 0.22 : 0.14) - i * 0.015})`; c.beginPath(); c.arc(x + Math.sin(ph) * h * 0.25, gy - h * (0.15 + ((ph * 0.13) % 1) * 0.8), h * (0.12 - i * 0.008), 0, 7); c.fill(); } c.restore(); }
+      human(a, h, { skin: rage ? '#e0501f' : '#b8401c', cloth: '#2a1410', trim: '#ffb02e', angry: true, bulk: 1.45, glowEyes: '#ffe14d', noScarf: true,
+        back: (sx, sy) => cape(c, sx, sy, gy, f, t * 3, '#5a1a0c', 14, 46),
+        head: (hx, hy, r) => {
+          for (const sd of [-1, 1]) { c.beginPath(); c.moveTo(hx + sd * r * 0.55, hy - r * 0.6); c.quadraticCurveTo(hx + sd * r * 1.5, hy - r * 1.1, hx + sd * r * 1.25, hy - r * 2.1); c.quadraticCurveTo(hx + sd * r * 1.05, hy - r * 1.2, hx + sd * r * 0.3, hy - r * 0.85); c.closePath(); fillStroke(c, cel(c, '#2a1a12', hx, hy - r * 2, hx, hy), 1.4, '#3a2418'); }
+          c.save(); c.globalCompositeOperation = 'lighter';
+          for (let i = 0; i < 6; i++) { const fx2 = hx + (i - 2.5) * r * 0.32, fl = Math.sin(t * 10 + i * 1.7) * r * 0.25; c.fillStyle = i % 2 ? 'rgba(255,200,60,.85)' : 'rgba(255,90,20,.8)'; c.beginPath(); c.moveTo(fx2 - r * 0.2, hy - r * 0.8); c.quadraticCurveTo(fx2, hy - r * (1.9 + (i % 3) * 0.25) - fl, fx2 + r * 0.2, hy - r * 0.8); c.fill(); }
+          c.restore();
+          c.strokeStyle = 'rgba(255,190,60,.85)'; c.lineWidth = 1.4; c.beginPath(); c.moveTo(hx - r * 0.5, hy + r * 0.2); c.lineTo(hx - r * 0.2, hy + r * 0.5); c.lineTo(hx - r * 0.35, hy + r * 0.75); c.stroke();
+        },
+        weapon: (hx, hy, ang) => {
+          const b2 = ang - f * 0.9, L = h * 0.62;
+          line(c, hx, hy, hx + Math.cos(b2) * L * 0.25, hy + Math.sin(b2) * L * 0.25, '#3a2418', 6);
+          c.save(); c.translate(hx, hy); c.rotate(b2);
+          c.beginPath(); c.moveTo(L * 0.22, -7); c.quadraticCurveTo(L * 0.7, -16 * f, L, -4 * f); c.quadraticCurveTo(L * 0.6, 10 * f, L * 0.22, 7); c.closePath(); fillStroke(c, cel(c, '#ff8a2a', L * 0.6, -14, L * 0.4, 10), 2, '#7a2a0a');
+          if (!LOW) { c.globalCompositeOperation = 'lighter'; for (let i = 0; i < 5; i++) { c.fillStyle = 'rgba(255,170,50,.5)'; c.beginPath(); c.arc(L * (0.35 + i * 0.15), -6 * f + Math.sin(t * 12 + i) * 4, 5 + i, 0, 7); c.fill(); } }
+          c.restore();
+        } });
+      return; }
     case 'colossus': return rocks(c, x, gy, h / 84, f, a.swing, a.atk, '#8a7f72', true, '#ffb347');
     case 'boss':
       if (bossKind === 'dunes') return scorpion(a, h / 116, false);

@@ -9,7 +9,7 @@ export const ENEMY_COST: Partial<Record<EnemyId, number>> = {
   gravedigger: 50, zombie: 50, runner: 70, bloater: 150, skelarcher: 120, abomination: 520, necromancer: 260,
   dwarfminer: 60, axethrower: 170, shieldwall: 260, berserker: 220, cannon: 600, gyrocopter: 280,
   goblin: 50, goblinspear: 70, ogre: 380, troll: 340, cyclops: 560, frostgiant: 820,
-  sprite: 170, moonarcher: 900, poltergeist: 230, soulreaper: 950, ghoul: 240, lich: 900, runepriest: 220, thunderlord: 1000, mammoth: 750, colossus: 1200,
+  ifrit: 0, sprite: 170, moonarcher: 900, poltergeist: 230, soulreaper: 950, ghoul: 240, lich: 900, runepriest: 220, thunderlord: 1000, mammoth: 750, colossus: 1200,
 };
 export const costOf = (u: EnemyId) => ENEMY_COST[u] ?? 200;
 
@@ -17,7 +17,7 @@ export type RegionId = 'oasis' | 'dunes' | 'mountains' | 'shadow' | 'tombs' | 'f
 
 export interface Wave { t: number; unit: EnemyId; count: number; mult?: number; }
 
-export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily' | 'conquest' | 'tower';
+export type LevelKind = 'campaign' | 'challenge' | 'survival' | 'daily' | 'conquest' | 'tower' | 'war';
 
 /** Battle-rule modifiers (challenges and the daily challenge). */
 export interface Mods {
@@ -35,6 +35,22 @@ export interface EnemyAI {
   income: number; // mining-rate multiplier
   graceTime: number; // seconds before its first attack
   miner?: EnemyId; // the faction's worker unit (default 'miner')
+}
+
+/** Nations War: AI nations that share the battlefield with the player. */
+export interface NationSpec {
+  faction: string; // civilization id (its army and fort style)
+  side: 0 | 1; // 0 = fights beside the player, 1 = against
+  castle: 0 | 1 | 2; // fort slot it defends: 0 player's (allies), 1 right fort, 2 mid-field citadel
+  stat: number; income: number; startGold: number; color: string; ally?: boolean;
+}
+export interface WarSpec {
+  mode: 'ffa' | 'duo' | 'raid';
+  ffa: boolean; // every nation fights every other nation
+  nations: NationSpec[];
+  citadelHp?: number;
+  boss?: EnemyId; bossAt?: number; bossMult?: number;
+  grace?: number;
 }
 
 export interface LevelDef {
@@ -57,6 +73,7 @@ export interface LevelDef {
   towerDmg?: number; // enemy fort archer strength (0 = no tower)
   enemyColor?: string; // faction colour for the enemy fort and banners
   faction?: string; // enemy civilization (fort style)
+  war?: WarSpec; // Nations War modes
 }
 
 export const REGIONS: { id: RegionId; from: number; to: number; enemy: EnemyId }[] = [

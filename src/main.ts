@@ -2,7 +2,9 @@ import './style.css';
 import { t, tk, tn, setLang, num, price, isRtl, LANGS, getLang, type Key, type Lang } from './i18n';
 import { BOARDS, submitAll, fetchTop, rankOf, myBest, flag, displayName, cleanName, COUNTRIES, type Board } from './leaderboard';
 import { a11y } from './game/render';
-import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents, currentUser } from './save';
+import { save, persist, initCloud, track, rolloverDaily, cloudOnline, flushEvents, currentUser, progress } from './save';
+import { dailyQuests, weeklyQuests, msToReset, WEEKLY_BONUS, type QuestDef } from './data/quests';
+import { WAR_MODES, WAR_TIERS, WAR_ICON, warLevel, warLineup, type WarMode } from './data/war';
 import { UNITS, PLAYER_UNITS, BASE_UNITS, MAX_UNIT_LEVEL, upgradeCost, upgradeMult, type UnitId } from './data/units';
 import { LEVELS, REGIONS, type RegionId, type LevelDef } from './data/levels';
 import { ABILITIES, PASSIVES, PASSIVE_MAX, UNIT_SHOP, type AbilityId, type PassiveId, type Requirement, type Perks } from './data/skills';
@@ -350,6 +352,7 @@ function showMenu() {
       <div class="col" style="align-items:center">
         <div class="title">${t('title')}</div>
         <div style="margin:-6px 0 14px;color:var(--sand2);font-weight:700">${t('tagline')}</div>
+        ${festival() ? `<div class="festival">🎉 ${t('festival')}</div>` : ''}
         <div class="menu-buttons">
           <button class="btn play" data-go="play">${t('play')} · ${t('level')} ${num(save.unlocked)}</button>
           <button class="btn secondary" data-go="modes">🏟️ ${t('modes')}</button>
@@ -383,7 +386,10 @@ function showMenu() {
 }
 
 function rewardsBadge() {
-  return canClaimDaily() || Date.now() >= save.chestAt;
+  rolloverDaily();
+  const questReady = dailyQuests(save.dq.date, save.dq.swapped).some((q) => !save.dq.claimed.includes(q.id) && (save.dq.c[q.key] ?? 0) >= q.goal)
+    || weeklyQuests(save.wq.week).some((q) => !save.wq.claimed.includes(q.id) && (save.wq.c[q.key] ?? 0) >= q.goal);
+  return canClaimDaily() || Date.now() >= save.chestAt || questReady;
 }
 
 // ---------------- Campaign ----------------
@@ -439,6 +445,7 @@ function showUpgrades() {
     save.unitLevels[id]++;
     if (tierOf(save.unitLevels[id]) > tierOf(save.unitLevels[id] - 1)) sfx('rank'); else sfx('coin');
     track('upgrade_purchased', { unit: id, level: save.unitLevels[id], cost });
+    progress('upgrade');
     if (save.unitLevels[id] >= 20) unlockAch('legend');
     persist();
     showUpgrades();
@@ -450,11 +457,19 @@ function showUpgrades() {
 const DAILY = [{ g: 100 }, { g: 150 }, { gems: 10 }, { g: 250 }, { g: 300 }, { gems: 25 }, { g: 500, gems: 50 }];
 const todayStr = () => new Date().toISOString().slice(0, 10);
 function canClaimDaily() { return save.daily.lastClaim !== todayStr(); }
-const QUESTS = [
-  { id: 'q_win2', key: 'wins' as const, goal: 2, reward: { g: 150, gems: 5 } },
-  { id: 'q_archers', key: 'archers' as const, goal: 20, reward: { g: 200, gems: 5 } },
-  { id: 'q_units', key: 'units' as const, goal: 50, reward: { g: 250, gems: 10 } },
-];
+const hms = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`; };
+const dhm = (ms: number) => { const h2 = Math.floor(ms / 3600000); return h2 >= 24 ? `${tn('daysLeft', Math.floor(h2 / 24))}` : hms(ms); };
+/** One quest line: description, progress bar, claim (and the daily swap) button. */
+function questRow(q: QuestDef, book: { c: Record<string, number>; claimed: string[] }, daily: boolean) {
+  const v = Math.min(q.goal, book.c[q.key] ?? 0);
+  const done = book.claimed.includes(q.id);
+  const canSwap = daily && !done && v === 0 && !save.dq.swapped.length;
+  return `<div class="quest ${done ? 'done' : ''}"><div class="grow"><div style="font-weight:700">${tn(('qk_' + q.key) as Key, q.goal)} <span style="color:var(--muted)">${num(v)}/${num(q.goal)}</span></div><div class="bar"><i style="width:${(v / q.goal) * 100}%"></i></div></div>
+    ${canSwap ? `<button class="btn secondary small" data-swap="${q.id}" title="${t('swapQuest')}">🔄</button>` : ''}<button class="btn small" data-q="${q.id}" data-w="${daily ? 0 : 1}" ${v >= q.goal && !done ? '' : 'disabled'}>${done ? '✓' : rewardLabel(q.reward)}</button></div>`;
+}
+/** Weekend festival (Friday–Sunday, UTC): battle gold ×1.5 for everyone worldwide. */
+const festival = () => [5, 6, 0].includes(new Date().getUTCDay());
+const eventMult = () => (festival() ? 1.5 : 1);
 function grant(r: { g?: number; gems?: number }) { save.gold += r.g ?? 0; save.gems += r.gems ?? 0; sfx('coin'); }
 const rewardLabel = (r: { g?: number; gems?: number }) => [r.g ? `🪙${num(r.g)}` : '', r.gems ? `💎${num(r.gems)}` : ''].filter(Boolean).join(' ');
 
@@ -470,13 +485,11 @@ function showRewards() {
         <h3>📅 ${t('daily')}</h3>
         <div class="calendar">${DAILY.map((r, i) => `<div class="day ${i < dayIdx ? 'done' : ''} ${i === dayIdx ? 'today' : ''}">${tn('day', i + 1)}<b>${rewardLabel(r)}</b></div>`).join('')}</div>
         <button class="btn" data-a="daily" ${canClaimDaily() ? '' : 'disabled'}>${canClaimDaily() ? t('claim') : t('claimed')}</button>
-        <h3 style="margin-top:6px">📜 ${t('quests')}</h3>
-        ${QUESTS.map((q) => {
-          const v = Math.min(q.goal, save.quests[q.key]);
-          const done = save.quests.claimed.includes(q.id);
-          return `<div class="quest"><div class="grow"><div style="font-weight:700">${tk(q.id)} <span style="color:var(--muted)">${num(v)}/${num(q.goal)}</span></div><div class="bar"><i style="width:${(v / q.goal) * 100}%"></i></div></div>
-            <button class="btn small" data-q="${q.id}" ${v >= q.goal && !done ? '' : 'disabled'}>${done ? '✓' : rewardLabel(q.reward)}</button></div>`;
-        }).join('')}
+        <h3 style="margin-top:6px">📜 ${t('quests')} <small class="reset-in">⏳ ${hms(msToReset().day)}</small></h3>
+        ${dailyQuests(save.dq.date, save.dq.swapped).map((q) => questRow(q, save.dq, true)).join('')}
+        <h3 style="margin-top:6px">🗓️ ${t('weeklyQuests')} <small class="reset-in">⏳ ${dhm(msToReset().week)}</small></h3>
+        ${weeklyQuests(save.wq.week).map((q) => questRow(q, save.wq, false)).join('')}
+        ${(() => { const all = weeklyQuests(save.wq.week).every((q) => save.wq.claimed.includes(q.id)); return `<div class="quest weekly-bonus"><div class="grow"><b>🎁 ${t('weeklyBonus')}</b> <span style="color:var(--muted)">${num(weeklyQuests(save.wq.week).filter((q) => save.wq.claimed.includes(q.id)).length)}/${num(5)}</span></div><button class="btn small" data-a="wbonus" ${all && !save.wq.bonus ? '' : 'disabled'}>${save.wq.bonus ? '✓' : rewardLabel(WEEKLY_BONUS)}</button></div>`; })()}
       </div>
       <div class="col panel" style="align-items:center;justify-content:center;text-align:center">
         <div style="font-size:72px">🧰</div>
@@ -518,11 +531,21 @@ function showRewards() {
     openChest();
   });
   el.querySelectorAll<HTMLElement>('[data-q]').forEach((b) => b.addEventListener('click', () => {
-    const q = QUESTS.find((x) => x.id === b.dataset.q)!;
-    if (save.quests.claimed.includes(q.id) || save.quests[q.key] < q.goal) return;
-    save.quests.claimed.push(q.id);
+    const daily = b.dataset.w !== '1';
+    const book = daily ? save.dq : save.wq;
+    const q = (daily ? dailyQuests(save.dq.date, save.dq.swapped) : weeklyQuests(save.wq.week)).find((x) => x.id === b.dataset.q)!;
+    if (!q || book.claimed.includes(q.id) || (book.c[q.key] ?? 0) < q.goal) return;
+    book.claimed.push(q.id);
     grant(q.reward); persist(); showRewards();
   }));
+  el.querySelectorAll<HTMLElement>('[data-swap]').forEach((b) => b.addEventListener('click', () => {
+    if (save.dq.swapped.length) return; // one free swap per day
+    save.dq.swapped.push(b.dataset.swap!); sfx('click'); persist(); showRewards();
+  }));
+  el.querySelector('[data-a="wbonus"]')?.addEventListener('click', () => {
+    if (save.wq.bonus || !weeklyQuests(save.wq.week).every((q) => save.wq.claimed.includes(q.id))) return;
+    save.wq.bonus = true; grant(WEEKLY_BONUS); persist(); showRewards();
+  });
   mount(el);
 }
 
@@ -548,7 +571,7 @@ function showSettings() {
           <button class="btn small ${save.a11y.colorblind ? '' : 'secondary'}" data-a="cb">🎨 ${t('colorblind')}</button>
           <button class="btn small ${save.a11y.calm ? '' : 'secondary'}" data-a="calm">🌙 ${t('calm')}</button></div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v1.1.0</div>
+        <div style="font-size:12px;color:var(--muted)">v1.2.0</div>
       </div>
     </div>
   </div>`);
@@ -593,6 +616,7 @@ function showModes() {
       ${card('tower', '🗼', t('tower'), t('towerShort'), `🏆 ${num(save.tower)}/${num(TOWER_FLOORS)}`, save.unlocked > 8 || save.stars[8] ? '' : `🔒 ${t('needLevel')} ${num(8)}`)}
       ${card('survival', '♾️', t('survival'), t('survivalDesc'), `${t('best')}: ${num(save.survivalBest)} ${t('waves')}`, survOpen ? '' : `🔒 ${t('needLevel')} ${num(5)}`)}
       ${card('daily', daily.mod.icon, t('dailyCh'), tk(daily.mod.id), save.dailyDone === today ? t('doneToday') : '💎 25 · 🪙 300', dailyOpen ? '' : `🔒 ${t('needLevel')} ${num(3)}`)}
+      ${card('war', '🌐', t('war'), t('warDesc'), `🏆 ${num(Object.keys(save.war.won).length)}/${num(WAR_MODES.length * WAR_TIERS)}`, warOpen() ? '' : `🔒 ${t('needLevel')} ${num(12)}`)}
     </div>
   </div>`);
   el.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => {
@@ -604,7 +628,41 @@ function showModes() {
     if (go === 'tower') showTower();
     if (go === 'survival') startLevel(survivalLevel(), 0);
     if (go === 'daily') startLevel(daily.level, 0);
+    if (go === 'war') showWar();
   }));
+  mount(el);
+}
+
+// ---------------- Nations War ----------------
+const warOpen = () => save.unlocked > 12 || !!save.stars[12];
+function showWar() {
+  const today = todayStr();
+  const fac = (id: string) => `<span class="war-fac" title="${tk('f_' + id)}"><img src="${facIcon(factionById(id).showcase)}" alt=""><small>${factionById(id).icon} ${tk('f_' + id)}</small></span>`;
+  const panel = (mode: WarMode) => {
+    const { foes, allies } = warLineup(mode, today);
+    const you = `<span class="war-fac you"><img src="${iconFor('hero')}" alt=""><small>🛡️ ${t('you')}</small></span>`;
+    const side = (list: string[], extra = '') => `<div class="war-side">${extra}${list.map(fac).join('')}</div>`;
+    const lineup = mode === 'ffa' ? `${side([], you)}<b class="vs">⚔</b>${side([foes[1]])}<b class="vs">⚔</b>${side([foes[0]])}`
+      : mode === 'duo' ? `${side(allies, you)}<b class="vs">VS</b>${side(foes)}`
+      : `${side(allies, you)}<b class="vs">VS</b><div class="war-side"><span class="war-fac boss"><img src="${enemyIcon('ifrit')}" alt=""><small>🔥 ${tk('u_ifrit')}</small></span>${fac(foes[0])}</div>`;
+    const tiers = Array.from({ length: WAR_TIERS }, (_, k) => {
+      const won = save.war.won[`${mode}-${k}`] ?? 0;
+      const open = k === 0 || (save.war.won[`${mode}-${k - 1}`] ?? 0) > 0;
+      return `<button class="btn small ${won ? '' : 'secondary'}" data-war="${mode}" data-tier="${k}" ${open ? '' : 'disabled'}>${open ? '' : '🔒 '}${'★'.repeat(k + 1)}${won ? ' ✓' : ''}</button>`;
+    }).join('');
+    return `<div class="panel war-card"><div class="war-h">${WAR_ICON[mode]} <b>${t(('war_' + mode) as Key)}</b>${save.war.firstWin[mode] !== today ? '<span class="chip">💎 +20</span>' : ''}</div>
+      <div class="war-desc">${t(('ward_' + mode) as Key)}</div><div class="war-lineup">${lineup}</div><div class="row war-tiers">${tiers}</div></div>`;
+  };
+  const el = h(`<div class="screen">${topbar()}
+    <div class="war-note">🗓️ ${t('warRotates')} · ⏳ ${hms(msToReset().day)}</div>
+    <div class="war-grid">${WAR_MODES.map(panel).join('')}</div>
+    <div class="row" style="justify-content:center">${diffPicker()}</div>
+  </div>`);
+  el.querySelectorAll<HTMLElement>('[data-war]').forEach((b) => b.addEventListener('click', () => {
+    sfx('click');
+    startLevel(warLevel(b.dataset.war as WarMode, Number(b.dataset.tier), save.unlocked, todayStr()), 0);
+  }));
+  bindDiff(el, showWar);
   mount(el);
 }
 
@@ -936,11 +994,16 @@ function startLevel(L: LevelDef, bonusGold: number) {
     onDrop: (_kind, side) => { if (side === 0) buzz(25); },
     onPerfect: () => { sfx('rank'); buzz(35); const p = h(`<div class="perfect-pop">✦ ${t('perfect')}</div>`); ui.appendChild(p); setTimeout(() => p.remove(), 900); },
     onSpawn: (id, side) => { if (side === 1 && !save.seen.includes(id)) save.seen.push(id); },
+    onEliminated: (nation) => { const c = battle?.cmds.find((k) => k.nation === nation); if (c) { bannerMsg(`🏳️ ${tk('f_' + c.faction)} ${t('eliminated')}`, 'rush'); buzz([40, 30, 40]); } },
+    onBoss: (id) => { if ((id as string) === 'enrage') { bannerMsg(`🔥 ${t('bossEnraged')}`, 'rage'); buzz([80, 40, 80]); } else { bannerMsg(`👑 ${tk('u_' + id)}`, 'rage'); buzz(120); } },
     onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
     onUnitTrained: (id) => {
       rolloverDaily();
       save.quests.units++;
       if (id === 'archer') save.quests.archers++;
+      progress('units');
+      if (id === 'archer' || id === 'crossbow') progress('archers');
+      if (id === 'camel' || id === 'cavalry' || id === 'lion') progress('riders');
       if (tutorialStep === 1 && id === 'sword') advanceTutorial();
     },
   });
@@ -949,9 +1012,10 @@ function startLevel(L: LevelDef, bonusGold: number) {
   tutorialStep = index === 1 && !save.tutorialDone ? 1 : 0;
   if (tutorialStep) track('tutorial_step', { step: 1 });
   buildHud();
+  const warBanner = L.kind === 'war' ? `${WAR_ICON[L.war!.mode]} ${t(('war_' + L.war!.mode) as Key)} · ${'★'.repeat(Number(L.id!.split('-')[1]) + 1)}` : '';
   const towerBanner = L.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(L.id))} · ${towerRule(Number(L.id)).icon} ${tk(towerRule(Number(L.id)).id)}` : '';
   const fac = L.kind === 'conquest' ? factionById(L.id!.split('-')[0]) : null;
-  const banner = towerBanner || (fac ? `${fac.icon} ${tk('f_' + fac.id)} · ${t('battle')} ${num(Number(L.id!.split('-')[1]))}` : L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '');
+  const banner = warBanner || towerBanner || (fac ? `${fac.icon} ${tk('f_' + fac.id)} · ${t('battle')} ${num(Number(L.id!.split('-')[1]))}` : L.kind === 'challenge' ? `${challengeById(L.id!).icon} ${tk('ch_' + L.id)}` : L.kind === 'survival' ? `♾️ ${t('survival')}` : L.kind === 'daily' ? `📅 ${tk(L.id!)}` : L.boss ? `👑 ${tk('b_' + L.region)}` : '');
   if (banner) bannerMsg(banner);
   lastT = performance.now();
   raf = requestAnimationFrame(loop);
@@ -1011,7 +1075,7 @@ function placeHint() {
 
 function buildHud() {
   const b = battle!;
-  const kindLabel = b.level.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(b.level.id))}` : b.level.kind === 'conquest' ? `${factionById(b.level.id!.split('-')[0]).icon} ${t('battle')} ${num(Number(b.level.id!.split('-')[1]))}` : b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
+  const kindLabel = b.level.kind === 'war' ? `${WAR_ICON[b.level.war!.mode]} ${t(('war_' + b.level.war!.mode) as Key)}` : b.level.kind === 'tower' ? `🗼 ${t('floor')} ${num(Number(b.level.id))}` : b.level.kind === 'conquest' ? `${factionById(b.level.id!.split('-')[0]).icon} ${t('battle')} ${num(Number(b.level.id!.split('-')[1]))}` : b.level.winAfter ? `${challengeById(b.level.id!).icon} ${t('surviveFor')} <b data-r="countdown">${num(b.level.winAfter)}</b>` : b.level.kind === 'challenge' ? challengeById(b.level.id!).icon + ' ' + tk('ch_' + b.level.id) : b.level.kind === 'survival' ? '♾️ <b data-r="wave">0</b>' : b.level.kind === 'daily' ? '📅 ' + t('dailyCh') : `${b.level.boss ? '👑' : ''} ${t('level')} ${num(b.level.index)}`;
   const desert = b.roster === PLAYER_UNITS;
   const unlockedUnits: EnemyId[] = desert
     ? PLAYER_UNITS.filter((id) => (b.level.kind === 'campaign' || !b.level.kind ? (isBase(id) ? UNITS[id].unlock <= Math.max(b.level.index, save.unlocked) : unitAvailable(id)) : unitAvailable(id)) && b.isAllowed(id))
@@ -1026,7 +1090,7 @@ function buildHud() {
       <span class="chip army-count" title="army">🛡️ <b data-r="myn">0</b> <i>⚔</i> <b data-r="en">0</b> 💀</span>
       <span class="chip bonds-chip" data-r="bonds" title="${t('bonds')}" style="display:none"></span>
       <span class="chip">${kindLabel}</span>
-      <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">▶${save.speed === 2 ? '▶' : ''} ×${save.speed}</button>
+      <button class="btn secondary small speed-btn" data-a="speed" aria-label="speed">${'▶'.repeat(save.speed)} ×${save.speed}</button>
       <button class="btn secondary small" data-a="gear" aria-label="settings">⚙️</button>
       <button class="btn secondary small" data-a="pause" aria-label="pause">II</button>
     </div>
@@ -1148,13 +1212,13 @@ function buildHud() {
     });
   });
   const ability = $(el, '[data-a="ability"]');
-  ability.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.useAbility(); });
+  ability.addEventListener('pointerdown', (e) => { e.preventDefault(); if (battle?.useAbility()) progress('ability'); });
   const ctrl = $(el, '[data-a="ctrl"]');
   ctrl.addEventListener('pointerdown', (e) => { e.preventDefault(); battle?.takeControl(); renderer.follow = true; });
   $(el, '[data-a="pause"]').addEventListener('click', () => pauseMenu());
   $(el, '[data-a="gear"]').addEventListener('click', () => pauseMenu());
   const spd = $(el, '[data-a="speed"]');
-  spd.addEventListener('click', () => { save.speed = save.speed === 1 ? 2 : 1; persist(); spd.textContent = `▶${save.speed === 2 ? '▶' : ''} ×${save.speed}`; sfx('click'); });
+  spd.addEventListener('click', () => { save.speed = save.speed === 3 ? 1 : (save.speed + 1) as 2 | 3; persist(); spd.textContent = `${'▶'.repeat(save.speed)} ×${save.speed}`; sfx('click'); });
 
   // Direct-control pad (hold buttons).
   pads[0].querySelectorAll<HTMLElement>('[data-d]').forEach((p) => {
@@ -1218,7 +1282,7 @@ addEventListener('keydown', (e) => {
   if (e.key === 'a' || e.key === 'ArrowLeft') battle.ctrlDir = -1;
   if (e.key === 'd' || e.key === 'ArrowRight') battle.ctrlDir = 1;
   if (e.key === ' ' && !e.repeat) battle.pressAttack();
-  if (e.key === 'q') battle.useAbility();
+  if (e.key === 'q' && battle.useAbility()) progress('ability');
   if (e.key === 'e') battle.takeControl();
 });
 addEventListener('keyup', (e) => {
@@ -1397,9 +1461,25 @@ function logUnitStats(b: Battle) {
   track('unit_spawned', { level: b.level.index, ...b.producedCounts });
 }
 
+/** Feeds quest counters from a battle (only the part not counted yet: a revive can end a battle twice). */
+const counted = new WeakMap<Battle, Record<string, number>>();
+function countQuests(b: Battle, win: boolean) {
+  const prev = counted.get(b) ?? {};
+  const now: Record<string, number> = { kills: b.stats.kills, miners: b.stats.enemyMinersKilled, perfect: b.stats.perfect, drops: b.stats.drops, well: Math.floor(b.stats.wellTime), bosses: b.stats.bossKills, survival: b.level.kind === 'survival' ? b.survivalWave : 0 };
+  for (const [k, v] of Object.entries(now)) progress(k as never, v - (prev[k] ?? 0));
+  counted.set(b, now);
+  if (!win) return;
+  progress('wins');
+  if (b.stars(true) === 3) progress('stars3');
+  if (b.level.kind === 'war') progress('war');
+  if (b.level.kind === 'conquest') progress('conquest');
+  if (b.level.kind === 'challenge' || b.level.kind === 'tower') progress('trials');
+}
+
 function onBattleEnd(win: boolean) {
   const b = battle;
   if (!b) return;
+  countQuests(b, win);
   hudRefs?.hint?.remove();
   tutorialStep = 0;
   if (win) save.tutorialDone = true;
@@ -1444,12 +1524,12 @@ function onBattleEnd(win: boolean) {
     }
     return;
   }
-  if (L.kind === 'challenge' || L.kind === 'daily' || L.kind === 'conquest' || L.kind === 'tower') return onSpecialWin(b);
+  if (L.kind === 'challenge' || L.kind === 'daily' || L.kind === 'conquest' || L.kind === 'tower' || L.kind === 'war') return onSpecialWin(b);
 
   const stars = b.stars(true);
   const prev = save.stars[L.index] ?? 0;
   const firstClear = prev === 0;
-  let gold = Math.round(L.reward * (firstClear ? 1 : 0.6) * DIFFICULTY[save.difficulty].reward);
+  let gold = Math.round(L.reward * (firstClear ? 1 : 0.6) * DIFFICULTY[save.difficulty].reward * eventMult());
   const gems = Math.max(0, stars - prev) * 3 + (firstClear && L.boss ? 20 : 0);
   save.stars[L.index] = Math.max(prev, stars);
   if (L.index === save.unlocked && L.index < LEVELS.length) save.unlocked++;
@@ -1536,7 +1616,8 @@ async function shareVictory(b: Battle, stars: number) {
 }
 
 function backTo(L: LevelDef) {
-  if (L.kind === 'tower') showTower();
+  if (L.kind === 'war') showWar();
+  else if (L.kind === 'tower') showTower();
   else if (L.kind === 'conquest') showFaction(factionById(L.id!.split('-')[0]));
   else if (L.kind === 'challenge') showChallenges();
   else if (L.kind === 'survival' || L.kind === 'daily') showModes();
@@ -1563,6 +1644,14 @@ function onSpecialWin(b: Battle) {
     if (first) save.conquest[fid] = k;
     if (first && k === CONQUEST_BATTLES) setTimeout(() => toast(`<span class="toast-ico">🛡️</span><div><b>${t('armyUnlocked')}</b><div>${tk('f_' + fid)}</div></div>`), 600);
     gold = Math.round(L.reward * (first ? 1 : 0.6));
+  } else if (L.kind === 'war') {
+    const [mode, ts] = L.id!.split('-');
+    const key = L.id!;
+    const first = !save.war.won[key];
+    save.war.won[key] = (save.war.won[key] ?? 0) + 1;
+    gold = Math.round(L.reward * (first ? 1.5 : 1));
+    gems = (first ? 15 + Number(ts) * 10 : 0) + (save.war.firstWin[mode] !== todayStr() ? 20 : 0); // + first win of the day in this mode
+    save.war.firstWin[mode] = todayStr();
   } else if (L.kind === 'challenge') {
     const c = challengeById(L.id!);
     const first = !save.trophies[c.id];
@@ -1577,7 +1666,7 @@ function onSpecialWin(b: Battle) {
     gems = first ? 25 : 0;
     save.dailyDone = todayStr();
   }
-  gold = Math.round(gold * DIFFICULTY[save.difficulty].reward);
+  gold = Math.round(gold * DIFFICULTY[save.difficulty].reward * eventMult());
   save.gold += gold; save.gems += gems;
   rolloverDaily(); save.quests.wins++;
   track('level_complete', { level: L.index, kind: L.kind, id: L.id, seconds: Math.round(b.time) });
@@ -1596,6 +1685,24 @@ function onSpecialWin(b: Battle) {
   el.querySelector('[data-a="back"]')!.addEventListener('click', () => { stopBattleLoop(); flushEvents(); backTo(L); });
 }
 
+/** Offline treasury: the mines keep digging while you're away (up to 8 hours). */
+function offlineTreasury() {
+  const away = Date.now() - (save.idleAt || Date.now());
+  if (away < 15 * 60000) return;
+  const hours = Math.min(8, away / 3600000);
+  const gold = Math.round(hours * (40 + Math.min(70, save.unlocked) * 4));
+  if (gold < 20) return;
+  const ov = h(`<div class="screen dim" style="z-index:40"><div class="panel col idle-box" style="align-items:center;text-align:center">
+    <div style="font-size:56px">⛏️💰</div><h3>${t('idleTitle')}</h3>
+    <div class="chip gold-chip" style="font-size:24px">🪙 ${num(gold)}</div><small style="color:var(--muted)">⏳ ${hms(Math.min(8 * 3600000, away))}</small>
+    <div class="row"><button class="btn" data-a="take">${t('idleCollect')}</button><button class="btn ad" data-a="take2">${t('idleDouble')}</button></div>
+  </div></div>`);
+  const take = (mult: number) => { save.gold += gold * mult; save.idleAt = Date.now(); persist(); sfx('coin'); ov.remove(); if (!battle) showMenu(); };
+  $(ov, '[data-a="take"]').addEventListener('click', () => take(1));
+  $(ov, '[data-a="take2"]').addEventListener('click', async () => { await showAd('rewarded', 'idle_double'); take(2); });
+  document.getElementById('app')!.appendChild(ov);
+}
+
 // ---------------- boot ----------------
 function onResize() { renderer.resize(); if (battle) renderer.clampCam(); else drawIdle(); }
 function drawIdle() { /* menus use CSS backgrounds */ const c = canvas.getContext('2d')!; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, canvas.width, canvas.height); }
@@ -1604,10 +1711,11 @@ rolloverDaily();
 applySettings();
 onResize();
 showMenu();
+offlineTreasury();
 if (claimSubDaily()) setTimeout(() => toast(`<span class="toast-ico">📅</span><div><b>${t('subDaily')}</b></div>`), 800);
 void initCloud(() => { applySettings(); if (!battle) showMenu(); }).then(syncScores);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();
 });
 // Dev-only hook for automated UI tests.
-if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, conquestLevel, factionById, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges };
+if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, conquestLevel, factionById, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges, offlineTreasury };

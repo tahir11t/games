@@ -16,7 +16,7 @@ import { ZH } from '../src/i18n-zh';
 import { JA } from '../src/i18n-ja';
 
 const files: Record<string, Record<string, string>> = { tr: TR, fr: FR, es: ES, id: ID, fa: FA, ur: UR, pt: PT, ru: RU, de: DE, hi: HI, zh: ZH, ja: JA };
-const keep = /[↻★✓⚔×]/g; // symbols the UI relies on
+const keep = /[↻★✓⚔×]|\{n\}/g; // symbols and placeholders the UI relies on
 let bad = 0;
 for (const [lang, dict] of Object.entries(files)) {
   const missing = KEYS.filter((k) => !(k in dict));

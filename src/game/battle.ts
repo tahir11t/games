@@ -1,5 +1,5 @@
 import { UNITS, MINER_GOLD, MINER_INTERVAL, MAX_MINERS, MAX_ARMY, CONTROL_BONUS, COUNTER_BONUS, FLY_HEIGHT, MAX_RANK, RANK_KILLS, RANK_HEAL, MINE_UPGRADE, MINE_YIELD, upgradeMult, type EnemyId, type UnitId, type UnitDef } from '../data/units';
-import { costOf, type LevelDef } from '../data/levels';
+import { costOf, type LevelDef, type WarSpec } from '../data/levels';
 import { ABILITIES, passiveFx, type Perks } from '../data/skills';
 import { survivalWave } from '../data/challenges';
 import { factionById, rosterOf, armyCost, armyTrain, type ArmyId } from '../data/factions';
@@ -14,6 +14,10 @@ export const MINE_X = [340, W - 340];
 export const TOWER_RANGE = [500, 400]; // player fort archers see further
 export const TOWER_COST = [0, 250, 450]; // price of the 2nd and 3rd fort archer
 export const MAX_TOWER_ARCHERS = 3;
+/** Nations War: the third nation's citadel stands in mid-field. */
+export const CITADEL_X = W / 2;
+/** x of castle slot 0 (player), 1 (right fort) or 2 (citadel). */
+export const castleX = (i: number) => (i === 2 ? CITADEL_X : CASTLE_X[i]);
 /** Visual tier from upgrade level: a new look every 5 levels. */
 export const tierOf = (lvl: number) => Math.min(4, Math.floor(lvl / 5));
 
@@ -80,6 +84,8 @@ export interface Unit {
   hidden: boolean; // miner sheltering inside the fort
   stompCd: number;
   auraCd: number;
+  nation: number; // owner: 0 = the player, 1 = the classic enemy, 2+ = Nations War commanders
+  face?: number; // facing (±1) when it can differ from the side (Nations War)
   dmgText?: FloatText; // merges rapid hits into one rising number
 }
 
@@ -89,9 +95,10 @@ export interface Projectile {
   side: Side; dmg: number; splash: number; kind: 'arrow' | 'bolt' | 'rock' | 'magic' | 'fire' | 'meteor';
   bonusVs?: EnemyId[];
   target?: Unit; // guided: follows the target so moving units are still hit
-  castle?: Side; // aimed at a fort
+  castle?: number; // aimed at a fort slot
   src?: Unit;
   air: boolean; // can hit flying units on a ground impact
+  nation?: number; // owner nation (defaults to side)
   pierce?: boolean;
 }
 
@@ -114,6 +121,8 @@ export interface BattleEvents {
   onDrop?(kind: DropKind, side: Side): void;
   onPerfect?(): void;
   onSpawn?(id: EnemyId, side: Side): void;
+  onEliminated?(nation: number): void;
+  onBoss?(id: EnemyId): void;
 }
 
 export type BattlePerks = Perks & { difficulty: Difficulty; army?: ArmyId; extra?: EnemyId[] };
@@ -126,6 +135,8 @@ const DEFAULT_PERKS: BattlePerks = {
 };
 
 let UID = 1;
+const WAR_ARMY_CAP = 26;
+export interface WarCmd { nation: number; side: Side; castle: number; pool: EnemyId[]; gold: number; income: number; stat: number; queue: QueueItem[]; mode: Mode; think: number; target: EnemyId | null; focus: number; focusT: number; alive: boolean; ally: boolean; color: string; faction: string; attackSize: number; }
 const PERFECT_EARLY = 0.12, PERFECT_LATE = 0.3, PERFECT_BONUS = 1.6;
 const WELL_GOLD = 5, WELL_HEAL = 0.012; // gold per 3 s, share of max HP per second
 const DROP_GOLD = 120;
@@ -138,8 +149,8 @@ export class Battle {
   bolts: { x1: number; y1: number; x2: number; y2: number; life: number }[] = []; // chain lightning
   particles: Particle[] = [];
   texts: FloatText[] = [];
-  castleHp: [number, number];
-  castleMax: [number, number];
+  castleHp: number[]; // slots: 0 player fort, 1 right fort, 2 citadel (0 when absent)
+  castleMax: number[];
   gold: number; // player
   egold = 0; // enemy commander
   queue: QueueItem[] = [];
@@ -166,9 +177,9 @@ export class Battle {
   counterTimer = 25;
   storm = 0;
   survivalWave = 0;
-  towerCd: [number, number] = [1, 2];
-  towerShot: [number, number] = [0, 0]; // anim timers
-  towerArchers: [number, number] = [1, 0];
+  towerCd: number[] = [1, 2, 1.5];
+  towerShot: number[] = [0, 0, 0]; // anim timers
+  towerArchers: number[] = [1, 0, 0];
   /** survival skill cards: stacking bonuses picked between waves */
   cards = { dmg: 1, speed: 1, gold: 1, horde: 0 };
   mineLevel: [number, number] = [1, 1];
@@ -218,8 +229,9 @@ export class Battle {
     else this.roster = PLAYER_UNITS;
     this.allowed = level.allowed ?? null;
     const fort = 1500 * passiveFx.walls(this.perks.passives.walls);
-    this.castleMax = [fort, level.castleHp];
-    this.castleHp = [fort, level.castleHp];
+    const citadel = level.war?.citadelHp ?? 0;
+    this.castleMax = [fort, level.castleHp, citadel];
+    this.castleHp = [fort, level.castleHp, citadel];
     this.gold = Math.max(startGold, level.startGold ?? 0) + passiveFx.treasury(this.perks.passives.treasury);
     if (!level.mods?.noMiners) {
       this.spawn(this.playerMiner, 0);
@@ -233,6 +245,7 @@ export class Battle {
       this.spawn(em, 1).x -= 20;
       this.aiAttackSize = 4 + Math.floor(Math.random() * 3);
     }
+    if (level.war) this.initWar(level.war);
   }
 
   get survival() { return this.level.kind === 'survival'; }
@@ -245,7 +258,7 @@ export class Battle {
     const q = side === 0 ? this.queue : this.equeue;
     return this.units.filter((u) => u.side === side && !u.dead && u.def.miner).length + q.filter((x) => UNITS[x.id].miner).length;
   }
-  armyCount(side: Side = 0) { return this.units.filter((u) => u.side === side && !u.dead).length + (side === 0 ? this.queue : this.equeue).length; }
+  armyCount(side: Side = 0) { return this.units.filter((u) => u.side === side && !u.dead && (side === 1 || u.nation === 0)).length + (side === 0 ? this.queue : this.equeue).length; }
 
   isAllowed(id: EnemyId) {
     if (UNITS[id].miner && this.level.mods?.noMiners) return false;
@@ -263,7 +276,7 @@ export class Battle {
     if (this.gold < this.costOf(id)) return false;
     if (d.miner && this.minerCount() >= MAX_MINERS) return false;
     if (this.armyCount() >= MAX_ARMY) return false;
-    if (d.maxCount && this.units.filter((u) => u.side === 0 && !u.dead && u.def.id === id).length + this.queue.filter((q) => q.id === id).length >= d.maxCount) return false;
+    if (d.maxCount && this.units.filter((u) => u.side === 0 && u.nation === 0 && !u.dead && u.def.id === id).length + this.queue.filter((q) => q.id === id).length >= d.maxCount) return false;
     return true;
   }
 
@@ -275,20 +288,21 @@ export class Battle {
     return true;
   }
 
-  spawn(id: EnemyId, side: Side, mult = 1) {
+  spawn(id: EnemyId, side: Side, mult = 1, nation: number = side) {
     const def = UNITS[id];
     const role = (this.roles[id] ?? id) as UnitId;
-    const lvlMult = side === 0 ? upgradeMult(this.perks.unitLevels[role] ?? 1) : mult;
-    const dmgMod = side === 1 ? this.level.mods?.enemyDmg ?? 1 : def.ranged ? passiveFx.eagle(this.perks.passives.eagle) : 1;
+    const mine = side === 0 && nation === 0; // the player's own soldier (allies scale by their commander)
+    const lvlMult = mine ? upgradeMult(this.perks.unitLevels[role] ?? 1) : mult;
+    const dmgMod = side === 1 ? this.level.mods?.enemyDmg ?? 1 : mine && def.ranged ? passiveFx.eagle(this.perks.passives.eagle) : 1;
     const u: Unit = {
       uid: UID++, def, side,
-      x: CASTLE_X[side] + (side === 0 ? 40 : -40),
+      x: nation >= 2 ? this.spawnX(nation) : CASTLE_X[side] + (side === 0 ? 40 : -40), nation,
       lane: (Math.random() - 0.5) * 30,
       hp: def.hp * lvlMult, maxHp: def.hp * lvlMult, dmg: def.dmg * lvlMult * dmgMod,
       cd: Math.random() * 0.5, anim: Math.random() * 10, moving: false, attacking: 0,
       chargeReady: !!def.charge, calm: 0, mineTimer: Math.random() * 2, dead: 0, hitFlash: 0, healFx: 0, kills: 0, rank: 0, raid: false, lastDx: 0,
       summonCd: def.summon?.every ?? 0, stun: 0, stompCd: def.stomp?.every ?? 0, auraCd: def.healAura?.every ?? 0, carry: 0, tripT: 0, hidden: false,
-      tier: side === 0 ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
+      tier: mine ? tierOf(this.perks.unitLevels[role] ?? 1) : Math.max(0, Math.min(3, Math.floor((mult - 1) / 0.3))),
     };
     this.units.push(u);
     this.ev.onSpawn?.(id, side);
@@ -296,7 +310,7 @@ export class Battle {
   }
 
   /** The desert role a unit counts as (civilization armies map by role). */
-  roleOf(u: Unit): EnemyId { return u.side === 0 ? (this.roles[u.def.id] ?? u.def.id) : u.def.id; }
+  roleOf(u: Unit): EnemyId { return u.side === 0 && u.nation === 0 ? (this.roles[u.def.id] ?? u.def.id) : u.def.id; }
   private bondRole(u: Unit): UnitId { const r = this.roleOf(u); return (u.side === 1 ? BOND_ALIAS[r] ?? r : r) as UnitId; }
   hasBond(side: Side, b: BondId) { return this.bonds[side].has(b); }
   private bondOf(u: Unit): BondId | null {
@@ -329,6 +343,7 @@ export class Battle {
 
   /** The Oasis Well: the side with more fighters around it slowly takes it over. */
   private updateWell(dt: number) {
+    if (this.level.war?.ffa) return; // the citadel stands where the well would be
     const w = this.well;
     let n0 = 0, n1 = 0;
     for (const u of this.units) {
@@ -354,7 +369,7 @@ export class Battle {
     if (w.tick >= 3) {
       w.tick -= 3;
       if (w.owner === 0) { this.gold += WELL_GOLD; this.texts.push({ x: WELL_X, y: GROUND - 90, text: `+${WELL_GOLD}`, life: 0.9, color: '#ffd34d' }); }
-      else this.egold += WELL_GOLD;
+      else this.addEnemyGold(WELL_GOLD);
     }
   }
 
@@ -382,7 +397,7 @@ export class Battle {
   private claimDrop(d: SupplyDrop, side: Side) {
     sfx('coin');
     for (let i = 0; i < 10; i++) this.dust(d.x, GROUND - 16, side === 0 ? '#ffe066' : '#ff8a6a', 4);
-    if (d.kind === 'gold') { if (side === 0) this.gold += DROP_GOLD; else this.egold += DROP_GOLD; }
+    if (d.kind === 'gold') { if (side === 0) this.gold += DROP_GOLD; else this.addEnemyGold(DROP_GOLD); }
     else if (d.kind === 'charge') { if (side === 0) this.ability = Math.min(1, this.ability + 0.5); else this.eability = Math.min(1, this.eability + 0.5); }
     else for (const u of this.units) if (u.side === side && !u.dead) { u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.25); u.healFx = 1; }
     if (side === 0) { this.stats.drops++; this.texts.push({ x: d.x, y: GROUND - 70, text: d.kind === 'gold' ? `+${DROP_GOLD}` : d.kind === 'charge' ? '⚡+50%' : '✚25%', life: 1.2, color: '#ffe066', size: 18 }); }
@@ -537,6 +552,7 @@ export class Battle {
     if (this.survival) this.runSurvival(dt);
     else this.runScript(dt);
     if (this.level.ai) this.runCommander(dt);
+    if (this.multi) this.runWar(dt);
 
     this.auras = this.units.filter((u) => u.def.aura && !u.dead);
     for (const u of this.units) {
@@ -551,19 +567,19 @@ export class Battle {
       if (u.def.stomp) {
         u.stompCd -= dt;
         const st = u.def.stomp;
-        if (u.stompCd <= 0 && this.units.some((v) => v.side !== u.side && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius)) {
+        if (u.stompCd <= 0 && this.units.some((v) => this.hostile(u, v) && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius)) {
           u.stompCd = st.every; u.attacking = 0.3;
           this.shake = Math.min(0.8, this.shake + 0.35); sfx('boom');
           for (let i = 0; i < 18; i++) this.dust(u.x + (Math.random() - 0.5) * st.radius * 1.6, GROUND - 4, '#c9b28a', 5 + Math.random() * 6);
-          const m = u.side === 0 ? upgradeMult(this.perks.unitLevels[(this.roles[u.def.id] ?? u.def.id) as UnitId] ?? 1) : this.enemyStat;
-          for (const v of this.units) if (v.side !== u.side && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius) { this.applyDamage(v, st.dmg * m, true, u); if (!v.def.boss) v.stun = Math.max(v.stun, st.stun); }
+          const m = this.statOf(u);
+          for (const v of this.units) if (this.hostile(u, v) && !v.dead && !v.def.flying && Math.abs(v.x - u.x) < st.radius) { this.applyDamage(v, st.dmg * m, true, u); if (!v.def.boss) v.stun = Math.max(v.stun, st.stun); }
         }
       }
       if (u.def.healAura) { // royal pulse: heals every nearby ally
         u.auraCd -= dt;
         if (u.auraCd <= 0) {
           u.auraCd = u.def.healAura.every;
-          for (const v of this.units) if (v.side === u.side && !v.dead && Math.abs(v.x - u.x) < u.def.healAura.radius && v.hp < v.maxHp) { v.hp = Math.min(v.maxHp, v.hp + v.maxHp * u.def.healAura.pct); v.healFx = 1; }
+          for (const v of this.units) if (v.side === u.side && !this.hostile(u, v) && !v.dead && Math.abs(v.x - u.x) < u.def.healAura.radius && v.hp < v.maxHp) { v.hp = Math.min(v.maxHp, v.hp + v.maxHp * u.def.healAura.pct); v.healFx = 1; }
           this.fx.push({ kind: 'spark', x: u.x, y: GROUND - 20, f: 1, life: 0.5, max: 0.5 });
           for (let i = 0; i < 10; i++) this.dust(u.x + (Math.random() - 0.5) * u.def.healAura.radius * 1.6, GROUND - 10 - Math.random() * 40, '#ffe27a', 4);
         }
@@ -574,8 +590,8 @@ export class Battle {
         if (u.summonCd <= 0) {
           u.summonCd = u.def.summon.every;
           if (this.armyCount(u.side) < MAX_ARMY) {
-            const m = this.spawn(u.def.summon.unit, u.side, u.side === 1 ? this.enemyStat : 1);
-            m.x = u.x + (u.side === 0 ? 20 : -20);
+            const m = this.spawn(u.def.summon.unit, u.side, this.multi ? this.statOf(u) : u.side === 1 ? this.enemyStat : 1, u.nation);
+            m.x = u.x + this.facing(u) * 20;
             for (let i = 0; i < 6; i++) this.dust(m.x, GROUND - 10, '#7a6a55', 4);
           }
         }
@@ -587,6 +603,7 @@ export class Battle {
       else if (u.def.heal || u.def.support) this.updateSupport(u, dt);
       else this.updateFighter(u, dt);
       u.lastDx = u.x - x0;
+      if (this.multi) u.face = Math.abs(u.lastDx) > 0.01 ? Math.sign(u.lastDx) : this.facing(u);
       if (u.moving) u.anim += dt * (u.def.speed / 9);
       else if (u.def.flying) u.anim += dt * 6;
     }
@@ -602,7 +619,8 @@ export class Battle {
     this.units = this.units.filter((u) => !u.dead || u.dead < 1.2);
     if (this.controlled?.dead) this.controlled = null;
 
-    if (this.level.winAfter && this.time >= this.level.winAfter && this.castleHp[0] > 0) this.finish(true);
+    if (this.multi) this.checkWar();
+    else if (this.level.winAfter && this.time >= this.level.winAfter && this.castleHp[0] > 0) this.finish(true);
     else if (this.castleHp[1] <= 0) this.finish(true);
     else if (this.castleHp[0] <= 0) this.finish(false);
   }
@@ -802,6 +820,159 @@ export class Battle {
     }
   }
 
+  // ---------------- Nations War: several AI nations on one battlefield ----------------
+  multi = false;
+  cmds: WarCmd[] = [];
+  /** who owns each castle slot (towers, splash and castle targeting check hostility against it) */
+  castleOwner: { side: Side; nation: number }[] = [{ side: 0, nation: 0 }, { side: 1, nation: 1 }, { side: 1, nation: 1 }];
+  private hitBy = -1; // nation behind the hit being resolved (towers, projectiles)
+  bossUnit: Unit | null = null;
+  private bossSpawned = false;
+  bossEnraged = false;
+
+  /** Enemies? Different sides always; in a free-for-all, also different nations on the same side. */
+  hostile(a: Unit, b: Unit) { return a.side !== b.side || (this.multi && !!this.level.war?.ffa && a.nation !== b.nation); }
+  hostileTo(side: Side, nation: number, b: { side: Side; nation: number }) { return side !== b.side || (this.multi && !!this.level.war?.ffa && nation !== b.nation); }
+  cmdOf(u: Unit) { return u.nation >= 2 ? this.cmds.find((c) => c.nation === u.nation) : undefined; }
+  /** Stat multiplier a unit's own summons and blasts use. */
+  private statOf(u: Unit) {
+    if (u.nation === 0) return upgradeMult(this.perks.unitLevels[(this.roles[u.def.id] ?? u.def.id) as UnitId] ?? 1);
+    return this.cmdOf(u)?.stat ?? (u.side === 1 ? this.enemyStat : 1);
+  }
+  /** Direction a unit fights in. */
+  facing(u: Unit) {
+    if (!this.multi) return u.side === 0 ? 1 : -1;
+    const tc = this.targetCastle(u);
+    return tc >= 0 ? Math.sign(castleX(tc) - u.x) || (u.side === 0 ? 1 : -1) : u.side === 0 ? 1 : -1;
+  }
+  /** Castle slot a unit is marching on: the opposite fort, or (Nations War) its commander's chosen target. */
+  targetCastle(u: Unit): number {
+    if (!this.multi) return u.side === 0 ? 1 : 0;
+    const alive = (i: number) => this.castleMax[i] > 0 && (this.castleHp[i] > 0 || !isFinite(this.castleHp[i])) && this.hostileTo(u.side, u.nation, this.castleOwner[i]);
+    const cmd = this.cmdOf(u);
+    if (cmd && !cmd.ally && cmd.focus >= 0 && alive(cmd.focus)) return cmd.focus;
+    let best = -1, bd = Infinity;
+    for (const i of [0, 1, 2]) {
+      if (!alive(i)) continue;
+      const d = Math.abs(castleX(i) - u.x) + ((castleX(i) - u.x) * (u.side === 0 ? 1 : -1) < 0 ? 4000 : 0); // prefer forts ahead
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  private spawnX(nation: number) {
+    const cmd = this.cmds.find((c) => c.nation === nation);
+    if (!cmd) return CASTLE_X[1] - 40;
+    const own = castleX(cmd.castle);
+    if (cmd.castle !== 2) return own + (cmd.side === 0 ? 40 : -40);
+    const foc = cmd.focus >= 0 ? castleX(cmd.focus) : own - 1;
+    return own + Math.sign(foc - own) * 30 + (Math.random() - 0.5) * 20;
+  }
+  /** Gold for the enemy side: the classic commander, or split between living war commanders. */
+  private addEnemyGold(n: number) {
+    const live = this.cmds.filter((c) => c.alive && c.side === 1);
+    if (!live.length) { this.egold += n; return; }
+    for (const c of live) c.gold += n / live.length;
+  }
+
+  private initWar(w: WarSpec) {
+    this.multi = true;
+    this.waveIdx = Infinity; // no scripted waves
+    w.nations.forEach((n, i) => {
+      const nation = i + 2;
+      const f = factionById(n.faction);
+      this.cmds.push({ nation, side: n.side, castle: n.castle, pool: [...f.pool, f.special], gold: n.startGold, income: n.income * this.diff.income, stat: n.stat * this.diff.stat,
+        queue: [], mode: 'defend', think: Math.random(), target: null, focus: -1, alive: true, ally: !!n.ally, color: n.color, faction: n.faction, attackSize: 5 + Math.floor(Math.random() * 3), focusT: 0 });
+      if (n.castle >= 1) this.castleOwner[n.castle] = { side: n.side, nation };
+    });
+    if (this.castleMax[2] > 0) this.towerArchers[2] = (this.level.towerDmg ?? 0) > 0 ? 1 : 0;
+  }
+
+  /** Each AI nation earns, trains, chooses a target and decides to attack or defend. */
+  private runWar(dt: number) {
+    const w = this.level.war!;
+    if (w.boss && !this.bossSpawned && this.time >= (w.bossAt ?? 40)) {
+      this.bossSpawned = true;
+      const bc = this.cmds.find((c) => !c.ally && c.side === 1);
+      const b = this.spawn(w.boss, 1, (bc?.stat ?? 1) * (w.bossMult ?? 1), bc?.nation ?? 1);
+      this.bossUnit = b;
+      this.fx.push({ kind: 'pillar', x: b.x, y: GROUND, f: -1, life: 1.2, max: 1.2 }, { kind: 'ring', x: b.x, y: GROUND, f: -1, life: 0.9, max: 0.9 });
+      this.shake = Math.min(1, this.shake + 0.6); sfx('boom');
+      this.ev.onBoss?.(w.boss);
+    }
+    const boss = this.bossUnit;
+    if (boss && !boss.dead && !this.bossEnraged && boss.hp < boss.maxHp * 0.5) { // enrage: hits harder and calls a burst of flame
+      this.bossEnraged = true; boss.dmg *= 1.35; boss.summonCd = 0; this.shake = Math.min(1, this.shake + 0.5); sfx('boom');
+      this.fx.push({ kind: 'ring', x: boss.x, y: GROUND, f: -1, life: 0.9, max: 0.9 });
+      this.ev.onBoss?.('enrage' as EnemyId);
+    }
+    for (const c of this.cmds) {
+      if (!c.alive) continue;
+      c.gold += c.income * dt;
+      if (c.queue.length) {
+        c.queue[0].left -= dt;
+        if (c.queue[0].left <= 0) { const it = c.queue.shift()!; this.spawn(it.id, c.side, c.stat, c.nation); }
+      }
+      c.think -= dt;
+      if (c.think > 0) continue;
+      c.think = 0.9;
+      const mine = this.units.filter((u) => u.nation === c.nation && !u.dead);
+      // buy: a varied army, saving for the planned unit
+      if (c.queue.length < 2 && mine.length < WAR_ARMY_CAP) {
+        if (!c.target) {
+          const own = new Map<EnemyId, number>();
+          for (const u of mine) own.set(u.def.id, (own.get(u.def.id) ?? 0) + 1);
+          const opts = c.pool.filter((id) => !UNITS[id].miner);
+          const sc = opts.map((id) => 1 / (1 + (own.get(id) ?? 0) * 0.7));
+          let r = Math.random() * sc.reduce((a, b) => a + b, 0);
+          c.target = opts[opts.length - 1];
+          for (let i = 0; i < opts.length; i++) { r -= sc[i]; if (r <= 0) { c.target = opts[i]; break; } }
+        }
+        let pick = c.target;
+        if (pick && costOf(pick) > c.gold && (mine.length < 4 || c.gold < costOf(pick) * 0.4) && c.gold >= 50) pick = c.pool.filter((id) => costOf(id) <= c.gold).sort((a, z) => costOf(z) - costOf(a))[0] ?? pick;
+        if (pick && costOf(pick) <= c.gold) {
+          c.gold -= costOf(pick);
+          c.queue.push({ id: pick, left: Math.max(2, UNITS[pick].train || costOf(pick) / 50) });
+          if (pick === c.target) c.target = null;
+        }
+      }
+      if (c.ally) { c.mode = this.mode; continue; } // allies follow your orders
+      // target: the weakest hostile fort (re-chosen every 20 s in a free-for-all)
+      c.focusT -= 0.9;
+      const live = (i: number) => this.castleMax[i] > 0 && (this.castleHp[i] > 0 || !isFinite(this.castleHp[i])) && this.hostileTo(c.side, c.nation, this.castleOwner[i]);
+      if (c.focus < 0 || !live(c.focus) || c.focusT <= 0) {
+        c.focusT = 20;
+        const opts = [0, 1, 2].filter(live);
+        c.focus = opts.sort((a, z) => this.castleHp[a] / this.castleMax[a] + Math.abs(castleX(a) - castleX(c.castle)) / W - (this.castleHp[z] / this.castleMax[z] + Math.abs(castleX(z) - castleX(c.castle)) / W))[0] ?? -1;
+      }
+      const army = mine.filter((u) => !u.def.miner);
+      const home = castleX(c.castle);
+      const threat = this.units.filter((u) => !u.dead && this.hostileTo(c.side, c.nation, u) && Math.abs(u.x - home) < 520).length;
+      if (this.time < (w.grace ?? 28)) c.mode = 'defend';
+      else if (threat > army.length * 1.2 && threat >= 3) c.mode = 'defend';
+      else if (c.mode !== 'attack' && army.length >= c.attackSize) c.mode = 'attack';
+      else if (c.mode === 'attack' && army.length < 3) { c.mode = 'defend'; c.attackSize = 5 + Math.floor(Math.random() * 4); }
+    }
+  }
+
+  /** Nations War end conditions: your fort falls, a nation is eliminated, the last fort or the boss falls. */
+  private checkWar() {
+    const w = this.level.war!;
+    if (this.castleHp[0] <= 0) { this.finish(false); return; }
+    for (const slot of [1, 2]) {
+      if (this.castleMax[slot] <= 0 || !isFinite(this.castleHp[slot]) || this.castleHp[slot] > 0) continue;
+      for (const c of this.cmds) {
+        if (!c.alive || c.castle !== slot) continue;
+        c.alive = false; c.queue = [];
+        for (const u of this.units) if (u.nation === c.nation && !u.dead) { u.dead = 0.001; this.dust(u.x, GROUND - 20, '#d9c08a', 5); }
+        this.shake = Math.min(1, this.shake + 0.5); sfx('boom');
+        this.ev.onEliminated?.(c.nation);
+      }
+    }
+    if (w.boss) { if (this.bossSpawned && this.bossUnit?.dead) this.finish(true); return; }
+    const foesLeft = [1, 2].some((i) => this.castleMax[i] > 0 && this.castleHp[i] > 0 && this.hostileTo(0, 0, this.castleOwner[i]));
+    if (!foesLeft) this.finish(true);
+  }
+
   /** Melee ground units can't reach flying units. */
   canHit(a: Unit, b: Unit) {
     if (b.hidden) return false;
@@ -812,7 +983,7 @@ export class Battle {
     let best: Unit | null = null;
     let bd = maxDist;
     for (const o of this.units) {
-      if (o.side === u.side || o.dead || !this.canHit(u, o)) continue;
+      if (!this.hostile(u, o) || o.dead || !this.canHit(u, o)) continue;
       if (minersOnly && o.def.id !== 'miner') continue;
       const d = Math.abs(o.x - u.x);
       if (d < bd) { bd = d; best = o; }
@@ -858,7 +1029,7 @@ export class Battle {
       let best: Unit | null = null;
       let worst = 0.98;
       for (const o of this.units) {
-        if (o.side !== u.side || o.dead || o === u || Math.abs(o.x - u.x) > u.def.range) continue;
+        if (o.side !== u.side || this.hostile(u, o) || o.dead || o === u || Math.abs(o.x - u.x) > u.def.range) continue;
         const r = o.hp / o.maxHp;
         if (r < worst) { worst = r; best = o; }
       }
@@ -871,8 +1042,8 @@ export class Battle {
       }
     }
     if (u.def.support && u.cd <= 0) { u.attacking = 0.3; u.cd = 0.6; } // drumming
-    const dir = u.side === 0 ? 1 : -1;
-    const allies = this.units.filter((o) => o.side === u.side && !o.dead && o !== u && o.def.id !== 'miner' && !o.def.heal && !o.def.support);
+    const dir = this.facing(u);
+    const allies = this.units.filter((o) => o.side === u.side && !this.hostile(u, o) && !o.dead && o !== u && o.def.id !== 'miner' && !o.def.heal && !o.def.support);
     const front = allies.length ? (dir > 0 ? Math.max(...allies.map((o) => o.x)) : Math.min(...allies.map((o) => o.x))) : this.formationX(u);
     let target = front - dir * 70;
     const form = this.formationX(u);
@@ -884,6 +1055,15 @@ export class Battle {
   private formationX(u: Unit): number {
     const back = u.def.ranged || u.def.heal || u.def.support;
     const idx = u.uid % 5;
+    const cmd = this.cmdOf(u);
+    if (cmd && !cmd.ally) { // Nations War commander: positions relative to its own fort and its target
+      const own = castleX(cmd.castle), tc = this.targetCastle(u);
+      const foc = tc >= 0 ? castleX(tc) : own + (u.side === 0 ? 300 : -300);
+      const d = Math.sign(foc - own) || -1;
+      if (cmd.mode === 'defend') return own + d * (200 - (back ? 70 : 0) + idx * 8);
+      if (cmd.mode === 'hold') return own + (foc - own) * 0.45 - d * (back ? 90 : 0);
+      return foc;
+    }
     if (u.side === 1) {
       const m = this.level.ai ? this.emode : this.enemyAlert ? 'defend' : 'attack';
       if (m === 'defend') return CASTLE_X[1] - 220 + (back ? 70 : 0) + idx * 8;
@@ -908,12 +1088,12 @@ export class Battle {
       if (!u.def.ranged && !u.def.miner) { if (this.formation === 'wedge') s *= 1.12; else if (this.formation === 'wall') s *= 0.82; }
     }
     if (this.bondOf(u) === 'charge') s *= 1.06;
-    for (const a of this.auras) if (a.def.support && a.side === u.side && a !== u && Math.abs(a.x - u.x) < 160) { s *= 1.15; break; }
+    for (const a of this.auras) if (a.def.support && a.side === u.side && !this.hostile(a, u) && a !== u && Math.abs(a.x - u.x) < 160) { s *= 1.15; break; }
     return s;
   }
 
   private rangeOf(u: Unit) {
-    if (u.side !== 0 || !u.def.ranged) return u.def.range;
+    if (u.side !== 0 || u.nation !== 0 || !u.def.ranged) return u.def.range;
     return u.def.range * passiveFx.eagle(this.perks.passives.eagle) * (this.formation === 'skirmish' ? 1.15 : 1);
   }
 
@@ -923,8 +1103,8 @@ export class Battle {
     const range = this.rangeOf(u);
     const isCtrl = u === this.controlled;
     const dmgMult = 1;
-    const foeSide: Side = u.side === 0 ? 1 : 0;
-    const enemyCastle = CASTLE_X[foeSide];
+    const foeSide = this.targetCastle(u);
+    const enemyCastle = foeSide >= 0 ? castleX(foeSide) : -99999;
 
     if (isCtrl) {
       if (this.ctrlDir) {
@@ -942,9 +1122,9 @@ export class Battle {
           this.texts.push({ x: u.x, y: this.unitY(u) - u.def.height - 34, text: '✦ ×1.6', life: 0.8, color: '#7df9ff', size: 17 });
           this.ev.onPerfect?.();
         }
-        if (def.ranged) { if (foe) this.shoot(u, foe, dmgMult); else if (Math.abs(enemyCastle - u.x) < range + 50) this.shootCastle(u, foeSide, dmgMult); }
+        if (def.ranged) { if (foe) this.shoot(u, foe, dmgMult); else if (foeSide >= 0 && Math.abs(enemyCastle - u.x) < range + 50) this.shootCastle(u, foeSide, dmgMult); }
         else if (foe) this.hit(u, foe, dmgMult);
-        else if (Math.abs(enemyCastle - u.x) < range + 50) this.hitCastle(u, foeSide, dmgMult);
+        else if (foeSide >= 0 && Math.abs(enemyCastle - u.x) < range + 50) this.hitCastle(u, foeSide, dmgMult);
         else sfx('swing');
       }
       return;
@@ -961,7 +1141,8 @@ export class Battle {
       }
     }
 
-    const defending = u.side === 0 ? this.mode === 'defend' : this.level.ai ? this.emode === 'defend' : false;
+    const cmdU = this.cmdOf(u);
+    const defending = cmdU && !cmdU.ally ? cmdU.mode === 'defend' : u.side === 0 ? this.mode === 'defend' : this.level.ai ? this.emode === 'defend' : false;
     const aggro = range + (defending ? 200 : 140);
     const foe = this.nearestFoe(u, aggro);
     if (foe) {
@@ -981,8 +1162,8 @@ export class Battle {
     }
 
     const castleDist = Math.abs(enemyCastle - u.x);
-    const attackingNow = u.side === 1 ? (this.level.ai ? this.emode === 'attack' : true) : this.mode === 'attack';
-    if (castleDist <= range + 50 && attackingNow && isFinite(this.castleHp[foeSide])) {
+    const attackingNow = cmdU && !cmdU.ally ? cmdU.mode === 'attack' : u.side === 1 ? (this.level.ai ? this.emode === 'attack' : true) : this.mode === 'attack';
+    if (foeSide >= 0 && castleDist <= range + 50 && attackingNow && isFinite(this.castleHp[foeSide])) {
       if (u.cd <= 0) {
         u.attacking = 0.3; u.calm = 0;
         u.cd = def.cooldown;
@@ -1011,7 +1192,7 @@ export class Battle {
     if (u.def.flying || u === this.controlled || u.def.miner) { u.x += dx; return; }
     const dir = Math.sign(dx);
     for (const o of this.units) {
-      if (o === u || o.dead || o.side !== u.side || o.def.flying || o.def.miner) continue;
+      if (o === u || o.dead || o.side !== u.side || this.hostile(u, o) || o.def.flying || o.def.miner) continue;
       const ahead = (o.x - u.x) * dir;
       const minD = Math.min(22, (u.def.height + o.def.height) * 0.14);
       if (ahead <= 0 || ahead > minD || Math.abs(o.lane - u.lane) > 8) continue;
@@ -1028,26 +1209,28 @@ export class Battle {
   }
 
   private updateTowers(dt: number) {
-    for (const side of [0, 1] as Side[]) {
-      this.towerShot[side] = Math.max(0, this.towerShot[side] - dt);
-      const n = this.towerArchers[side];
-      if (!n || (side === 1 && !isFinite(this.castleHp[1]))) continue;
-      const dmg = side === 0 ? 20 * passiveFx.towers(this.perks.passives.towers) : (this.level.towerDmg ?? 0) * this.diff.tower;
+    for (const slot of [0, 1, 2]) {
+      const own = this.castleOwner[slot];
+      const side = own.side;
+      this.towerShot[slot] = Math.max(0, this.towerShot[slot] - dt);
+      const n = this.towerArchers[slot];
+      if (!n || (slot >= 1 && (!isFinite(this.castleHp[slot]) || this.castleHp[slot] <= 0))) continue;
+      const dmg = slot === 0 ? 20 * passiveFx.towers(this.perks.passives.towers) : (this.level.towerDmg ?? 0) * this.diff.tower;
       if (!dmg) continue;
-      this.towerCd[side] -= dt;
-      if (this.towerCd[side] > 0) continue;
-      const fx = CASTLE_X[side] + (side === 0 ? -60 : 60);
-      const range = TOWER_RANGE[side];
-      const foes = this.units.filter((o) => o.side !== side && !o.dead && !o.hidden && Math.abs(o.x - fx) < range).sort((a, z) => Math.abs(a.x - fx) - Math.abs(z.x - fx));
-      if (!foes.length) { this.towerCd[side] = 0.25; continue; }
-      this.towerCd[side] = side === 0 ? (this.rage ? 0.45 : 1.0) : 1.4;
-      this.towerShot[side] = 0.3;
+      this.towerCd[slot] -= dt;
+      if (this.towerCd[slot] > 0) continue;
+      const fx = slot === 2 ? CITADEL_X : CASTLE_X[side] + (side === 0 ? -60 : 60);
+      const range = slot === 2 ? 380 : TOWER_RANGE[side];
+      const foes = this.units.filter((o) => this.hostileTo(own.side, own.nation, o) && !o.dead && !o.hidden && Math.abs(o.x - fx) < range).sort((a, z) => Math.abs(a.x - fx) - Math.abs(z.x - fx));
+      if (!foes.length) { this.towerCd[slot] = 0.25; continue; }
+      this.towerCd[slot] = side === 0 ? (this.rage ? 0.45 : 1.0) : 1.4;
+      this.towerShot[slot] = 0.3;
       // Each fort archer looses an arrow, spreading over the closest targets.
       for (let k = 0; k < n; k++) {
         const t = foes[k % foes.length];
         const sx = fx + (side === 0 ? 1 : -1) * (k === 0 ? -30 : k === 1 ? 10 : 55), sy = GROUND - (k === 0 ? 250 : 180);
         const d = Math.abs(t.x - sx);
-        this.projectiles.push({ x: sx, y: sy, vx: 0, vy: 0, sx, sy, tx: t.x, ty: this.unitY(t) - t.def.height * 0.5, t: -k * 0.12, T: Math.max(0.3, d / 650), arc: 25 + d * 0.06, side, dmg, splash: 0, kind: 'arrow', target: t, air: true });
+        this.projectiles.push({ x: sx, y: sy, vx: 0, vy: 0, sx, sy, tx: t.x, ty: this.unitY(t) - t.def.height * 0.5, t: -k * 0.12, T: Math.max(0.3, d / 650), arc: 25 + d * 0.06, side, dmg, splash: 0, kind: 'arrow', target: t, air: true, nation: own.nation });
       }
     }
   }
@@ -1063,27 +1246,28 @@ export class Battle {
     if (bond === 'volley' || bond === 'charge') m *= 1.06;
     else if (bond === 'brothers') m *= 1.05;
     if (u.side === 1 && this.debuff > 0) m *= 0.7;
-    for (const h of this.auras) if (h.side === u.side && h !== u && Math.abs(h.x - u.x) < 150) { m *= 1 + h.def.aura!; break; }
+    for (const h of this.auras) if (h.side === u.side && !this.hostile(h, u) && h !== u && Math.abs(h.x - u.x) < 150) { m *= 1 + h.def.aura!; break; }
     return m;
   }
 
   private hit(u: Unit, foe: Unit, mult: number) {
     let dmg = u.dmg * mult * this.outMult(u, foe.def);
+    this.hitBy = u.nation;
     if (u.chargeReady && u.def.charge) { dmg *= 2; u.chargeReady = false; this.dust(foe.x, GROUND - 6, '#e8cf96', 6); }
     if (u.def.crit && Math.random() < u.def.crit) {
       dmg *= 2.5;
       this.texts.push({ x: foe.x, y: this.unitY(foe) - foe.def.height - 10, text: '✦', life: 0.6, color: '#ff6b3d' });
     }
     if (u.def.splash) {
-      for (const o of this.units) if (o.side !== u.side && !o.dead && this.canHit(u, o) && Math.abs(o.x - foe.x) < u.def.splash) this.applyDamage(o, o === foe ? dmg : dmg * 0.5, o !== foe, u);
+      for (const o of this.units) if (this.hostile(u, o) && !o.dead && this.canHit(u, o) && Math.abs(o.x - foe.x) < u.def.splash) this.applyDamage(o, o === foe ? dmg : dmg * 0.5, o !== foe, u);
     } else this.applyDamage(foe, dmg, false, u);
     // A little knockback sells the impact.
-    if (!foe.def.boss && foe.def.hp < 700) foe.x += (u.side === 0 ? 1 : -1) * (u.def.hp > 1000 ? 10 : 3);
+    if (!foe.def.boss && foe.def.hp < 700) foe.x += this.facing(u) * (u.def.hp > 1000 ? 10 : 3);
     sfx('hit');
     const fy = this.unitY(foe) - foe.def.height * 0.6;
     if (this.fx.length < 60) {
-      this.fx.push({ kind: 'slash', x: (u.x + foe.x) / 2, y: fy, f: u.side === 0 ? 1 : -1, life: 0.18, max: 0.18 });
-      this.fx.push({ kind: 'spark', x: foe.x, y: fy, f: u.side === 0 ? 1 : -1, life: 0.22, max: 0.22 });
+      this.fx.push({ kind: 'slash', x: (u.x + foe.x) / 2, y: fy, f: this.facing(u), life: 0.18, max: 0.18 });
+      this.fx.push({ kind: 'spark', x: foe.x, y: fy, f: this.facing(u), life: 0.22, max: 0.22 });
     }
   }
 
@@ -1091,13 +1275,13 @@ export class Battle {
     return GROUND + u.lane - (u.def.flying ? FLY_HEIGHT + Math.sin(u.anim * 0.6) * 8 : 0);
   }
 
-  private hitCastle(u: Unit, side: Side, mult: number) {
+  private hitCastle(u: Unit, side: number, mult: number) {
     if (!isFinite(this.castleHp[side])) return;
     const dmg = u.dmg * mult * this.outMult(u) * (u.def.id === 'catapult' ? 2 : 1);
     this.castleHp[side] = Math.max(0, this.castleHp[side] - dmg);
     this.shake = Math.min(0.4, this.shake + 0.05);
     sfx('hit');
-    this.dust(CASTLE_X[side] + (side === 0 ? 50 : -50), GROUND - 40 - Math.random() * 80, '#b9925a', 5);
+    this.dust(castleX(side) + (side === 0 ? 50 : side === 1 ? -50 : Math.sign(u.x - CITADEL_X) * 50), GROUND - 40 - Math.random() * 80, '#b9925a', 5);
   }
 
   private projKind(u: Unit): Projectile['kind'] {
@@ -1113,21 +1297,24 @@ export class Battle {
     const d = Math.abs(foe.x - u.x);
     const T = kind === 'bolt' ? Math.max(0.2, d / 900) : Math.max(0.3, d / 560);
     const arc = kind === 'bolt' ? 8 : kind === 'rock' ? 90 + d * 0.15 : 25 + d * 0.12;
-    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx: foe.x, ty, t: 0, T, arc, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, bonusVs: u.def.bonusVs, target: kind === 'rock' ? undefined : foe, src: u, air: kind !== 'rock', pierce: u.def.pierce });
+    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx: foe.x, ty, t: 0, T, arc, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, bonusVs: u.def.bonusVs, target: kind === 'rock' ? undefined : foe, src: u, air: kind !== 'rock', pierce: u.def.pierce, nation: u.nation });
     sfx(kind === 'rock' ? 'throw' : 'arrow');
   }
 
-  private shootCastle(u: Unit, side: Side, mult: number) {
+  private shootCastle(u: Unit, side: number, mult: number) {
     const kind = this.projKind(u);
     const sy = this.unitY(u) - u.def.height * 0.8;
-    const tx = CASTLE_X[side] + (side === 0 ? 40 : -40);
+    const tx = castleX(side) + (side === 0 ? 40 : side === 1 ? -40 : Math.sign(u.x - CITADEL_X) * 40);
     const d = Math.abs(tx - u.x);
-    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx, ty: GROUND - 70, t: 0, T: Math.max(0.3, d / 560), arc: kind === 'bolt' ? 8 : 40 + d * 0.15, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, castle: side, src: u, air: false });
+    this.projectiles.push({ x: u.x, y: sy, vx: 0, vy: 0, sx: u.x, sy, tx, ty: GROUND - 70, t: 0, T: Math.max(0.3, d / 560), arc: kind === 'bolt' ? 8 : 40 + d * 0.15, side: u.side, dmg: u.dmg * mult * this.outMult(u), splash: u.def.splash ?? 0, kind, castle: side, src: u, air: false, nation: u.nation });
     sfx(kind === 'rock' ? 'throw' : 'arrow');
   }
 
   private impact(p: Projectile) {
     const foeSide: Side = p.side === 0 ? 1 : 0;
+    const pn = p.nation ?? p.side;
+    const isFoe = (o: Unit) => this.hostileTo(p.side, pn, o);
+    this.hitBy = pn;
     const x = p.x;
     if (p.castle !== undefined) {
       if (isFinite(this.castleHp[p.castle])) {
@@ -1146,7 +1333,7 @@ export class Battle {
     }
     if (p.pierce) { // the arrow passes through everyone along its flight
       const lo = Math.min(p.sx, x), hi = Math.max(p.sx, x);
-      for (const o of this.units) if (o.side === foeSide && !o.dead && o !== primary && o.x >= lo && o.x <= hi) this.applyDamage(o, p.dmg * 0.7, true, p.src);
+      for (const o of this.units) if (isFoe(o) && !o.dead && o !== primary && o.x >= lo && o.x <= hi) this.applyDamage(o, p.dmg * 0.7, true, p.src);
       for (let i = 0; i < 6; i++) this.dust(lo + Math.random() * (hi - lo), GROUND - 40, '#cfe8ff', 3);
     }
     const ch = p.src?.def.chain;
@@ -1156,7 +1343,7 @@ export class Battle {
       if (!primary.def.boss) primary.stun = Math.max(primary.stun, ch.stun);
       for (let j = 1; j < ch.count; j++) {
         let next: Unit | null = null, bd = 190;
-        for (const o of this.units) if (o.side === foeSide && !o.dead && !hit.has(o)) { const d = Math.abs(o.x - from.x); if (d < bd) { bd = d; next = o; } }
+        for (const o of this.units) if (isFoe(o) && !o.dead && !hit.has(o)) { const d = Math.abs(o.x - from.x); if (d < bd) { bd = d; next = o; } }
         if (!next) break;
         this.bolts.push({ x1: from.x, y1: this.unitY(from) - from.def.height * 0.5, x2: next.x, y2: this.unitY(next) - next.def.height * 0.5, life: 0.25 });
         this.applyDamage(next, p.dmg * 0.75, true, p.src);
@@ -1168,7 +1355,7 @@ export class Battle {
     if (!primary || p.splash) {
       const radius = p.splash || 20;
       for (const o of this.units) {
-        if (o.side !== foeSide || o.dead || o === primary) continue;
+        if (!isFoe(o) || o.dead || o === primary) continue;
         if (o.def.flying && !p.air && !primary) continue;
         if (o.def.flying && !primary && p.kind !== 'meteor' && p.kind !== 'fire' && p.kind !== 'arrow') continue;
         if (Math.abs(o.x - x) < radius) {
@@ -1180,8 +1367,9 @@ export class Battle {
       }
     }
     // Siege shots that land near a fort still chip it.
-    if (!primary && Math.abs(CASTLE_X[foeSide] - x) < 70 && isFinite(this.castleHp[foeSide]) && (p.kind === 'rock' || p.kind === 'meteor')) {
-      this.castleHp[foeSide] = Math.max(0, this.castleHp[foeSide] - p.dmg);
+    const hitSlot = this.multi ? [0, 1, 2].find((i) => this.castleMax[i] > 0 && this.hostileTo(p.side, pn, this.castleOwner[i]) && Math.abs(castleX(i) - x) < 70) ?? -1 : foeSide;
+    if (!primary && hitSlot >= 0 && Math.abs(castleX(hitSlot) - x) < 70 && isFinite(this.castleHp[hitSlot]) && (p.kind === 'rock' || p.kind === 'meteor')) {
+      this.castleHp[hitSlot] = Math.max(0, this.castleHp[hitSlot] - p.dmg);
     }
     const color = p.kind === 'magic' ? '#c77dff' : p.kind === 'fire' || p.kind === 'meteor' ? '#ff8a3d' : '#e8cf96';
     if (p.kind !== 'arrow' && p.kind !== 'bolt' || !hitAny) for (let i = 0; i < (p.kind === 'rock' || p.kind === 'meteor' ? 14 : 3); i++) this.dust(x, p.y, color, 3 + Math.random() * 5);
@@ -1212,11 +1400,12 @@ export class Battle {
     o.hp -= dmg;
     o.hitFlash = 0.12;
     this.damageNumber(o, dealt, isSplash);
-    if (src?.side === 0) this.stats.damage[src.def.id as UnitId] = (this.stats.damage[src.def.id as UnitId] ?? 0) + dealt;
+    if (src?.side === 0 && src.nation === 0) this.stats.damage[src.def.id as UnitId] = (this.stats.damage[src.def.id as UnitId] ?? 0) + dealt;
     if (src?.def.lifesteal && !src.dead && dealt > 0) { src.hp = Math.min(src.maxHp, src.hp + dealt * src.def.lifesteal); src.healFx = Math.max(src.healFx, 0.3); }
     if (o.hp <= 0 && !o.dead) {
       o.dead = 0.001;
-      if (o.side === 1) {
+      const killer = src?.nation ?? this.hitBy;
+      if (o.side === 1 && (!this.multi || killer === 0)) {
         this.stats.kills++;
         this.streak = this.streakT > 0 ? this.streak + 1 : 1;
         this.streakT = 2.8;
@@ -1226,9 +1415,14 @@ export class Battle {
         const bounty = Math.round((o.def.boss ? 200 : 8 + o.def.hp / 25) * (this.level.mods?.goldMult ?? 1));
         this.gold += bounty;
         this.texts.push({ x: o.x, y: GROUND - 70, text: `+${bounty}`, life: 1, color: '#ffd34d' });
-      } else {
-        this.stats.lost++;
-        this.egold += Math.round(4 + o.def.hp / 40); // enemy earns a small bounty too
+      } else if (o.side === 0) {
+        if (o.nation === 0) this.stats.lost++;
+        const bounty = Math.round(4 + o.def.hp / 40); // the enemy earns a small bounty too
+        const kc = this.multi ? this.cmds.find((c) => c.nation === killer) : undefined;
+        if (kc) kc.gold += bounty; else this.egold += bounty;
+      } else { // Nations War: one AI nation killed another's soldier
+        const kc = this.cmds.find((c) => c.nation === killer);
+        if (kc) kc.gold += Math.round(4 + o.def.hp / 40);
       }
       if (src && !src.dead && !src.def.boss && src.rank < MAX_RANK) {
         src.kills++;
@@ -1246,9 +1440,9 @@ export class Battle {
       for (let i = 0; i < 8; i++) this.dust(o.x, this.unitY(o) - o.def.height * 0.5, o.def.id === 'ghost' || o.def.id === 'djinn' ? '#9fd8ff' : '#f0dcae', 3 + Math.random() * 4);
       // A lich nearby raises the fallen as a zombie on its own side.
       if (!o.def.boss && !o.def.miner) {
-        const lich = this.units.find((v) => v.def.raiseDead && !v.dead && v.side !== o.side && Math.abs(v.x - o.x) < 280);
+        const lich = this.units.find((v) => v.def.raiseDead && !v.dead && this.hostile(v, o) && Math.abs(v.x - o.x) < 280);
         if (lich && this.armyCount(lich.side) < MAX_ARMY) {
-          const z = this.spawn(lich.def.raiseDead!, lich.side, lich.side === 1 ? this.enemyStat : 1);
+          const z = this.spawn(lich.def.raiseDead!, lich.side, this.multi ? this.statOf(lich) : lich.side === 1 ? this.enemyStat : 1, lich.nation);
           z.x = o.x; z.lane = o.lane;
           for (let i = 0; i < 8; i++) this.dust(o.x, GROUND - 10, '#7dff5c', 4);
         }
@@ -1257,7 +1451,7 @@ export class Battle {
         const e = o.def.explode;
         for (let i = 0; i < 16; i++) this.dust(o.x, GROUND - 20, i % 2 ? '#8fbf3a' : '#c6e070', 5 + Math.random() * 6);
         this.shake = Math.min(0.6, this.shake + 0.25); sfx('boom');
-        for (const v of this.units) if (v.side !== o.side && !v.dead && Math.abs(v.x - o.x) < e.radius && !v.def.flying) this.applyDamage(v, e.dmg * (o.side === 1 ? this.enemyStat : 1), true);
+        for (const v of this.units) if (this.hostile(o, v) && !v.dead && Math.abs(v.x - o.x) < e.radius && !v.def.flying) this.applyDamage(v, e.dmg * (o.side === 1 ? this.enemyStat : 1), true);
       }
     }
   }

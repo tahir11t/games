@@ -3,6 +3,7 @@ import { PLAYER_UNITS, type UnitId } from './data/units';
 import type { Difficulty } from './game/battle';
 import type { AbilityId, PassiveId, ChallengeId } from './data/skills';
 import { detectLang, type Lang } from './i18n';
+import { weekKey, type QKey } from './data/quests';
 
 export interface SaveData {
   v: 1;
@@ -29,7 +30,7 @@ export interface SaveData {
   difficulty: Difficulty;
   music: string; // track id or 'auto'
   musicOn: boolean;
-  speed: 1 | 2;
+  speed: 1 | 2 | 3;
   camMode: 'both' | 'arrows' | 'touch';
   quality: 'auto' | 'high' | 'low';
   achievements: string[];
@@ -47,6 +48,10 @@ export interface SaveData {
   vibrate: boolean;
   profile: { name: string; country: string | null; tag: string }; // shown on the global leaderboard (tag: default-name suffix)
   a11y: { colorblind: boolean; calm: boolean };
+  dq: { date: string; c: Record<string, number>; claimed: string[]; swapped: string[] }; // daily quests (v1.2)
+  wq: { week: string; c: Record<string, number>; claimed: string[]; bonus: boolean }; // weekly quests
+  war: { won: Record<string, number>; firstWin: Record<string, string> }; // Nations War: wins per mode-tier, last daily first-win date
+  idleAt: number; // when the offline treasury was last collected
   updatedAt: number;
 }
 
@@ -55,7 +60,7 @@ const KEY = 'sandwars.save.v1';
 /** Fill in fields added after a save was written (shallow + nested maps). */
 export function migrate(raw: Partial<SaveData>): SaveData {
   const d = defaultSave();
-  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub }, profile: { ...d.profile, ...raw.profile }, a11y: { ...d.a11y, ...raw.a11y } };
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub }, profile: { ...d.profile, ...raw.profile }, a11y: { ...d.a11y, ...raw.a11y }, dq: { ...d.dq, ...raw.dq }, wq: { ...d.wq, ...raw.wq }, war: { ...d.war, ...raw.war } };
 }
 const today = () => new Date().toISOString().slice(0, 10);
 /** The device's country from its locale (e.g. ar-SA → SA), if it names one. */
@@ -110,6 +115,10 @@ export function defaultSave(): SaveData {
     vibrate: true,
     profile: { name: '', country: localeCountry(), tag: String(1000 + Math.floor(Math.random() * 9000)) },
     a11y: { colorblind: false, calm: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches },
+    dq: { date: '', c: {}, claimed: [], swapped: [] },
+    wq: { week: '', c: {}, claimed: [], bonus: false },
+    war: { won: {}, firstWin: {} },
+    idleAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
@@ -148,8 +157,19 @@ export let save: SaveData = (() => {
 
 export function rolloverDaily() {
   const d = today();
+  if (save.dq.date !== d) save.dq = { date: d, c: {}, claimed: [], swapped: [] };
+  const wk = weekKey(d);
+  if (save.wq.week !== wk) save.wq = { week: wk, c: {}, claimed: [], bonus: false };
   if (save.quests.date !== d) save.quests = { date: d, wins: 0, archers: 0, units: 0, claimed: [] };
   if (save.adCountDate !== d) { save.adCountDate = d; save.chestAdsToday = 0; }
+}
+
+/** Counts toward today's and this week's quests. */
+export function progress(key: QKey, n = 1) {
+  if (!n) return;
+  rolloverDaily();
+  save.dq.c[key] = (save.dq.c[key] ?? 0) + n;
+  save.wq.c[key] = (save.wq.c[key] ?? 0) + n;
 }
 
 let cloudTimer: number | undefined;
@@ -214,7 +234,7 @@ export function track(name: string, params: Record<string, unknown> = {}) {
 export async function flushEvents() {
   if (!sb || !userId || !queue.length) return;
   const batch = queue.splice(0, queue.length).map((e) => ({
-    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.1.0', locale: save.lang,
+    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.2.0', locale: save.lang,
   }));
   const { error } = await sb.from('analytics_events').insert(batch);
   if (error) console.warn('[analytics] flush failed', error.message);

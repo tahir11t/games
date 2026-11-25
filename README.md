@@ -281,6 +281,37 @@ Also new:
 
 To turn the leaderboard on in production: enable **anonymous sign-ins** (see below), then apply the v1.1 migration.
 
+## v1.2: Nations War, daily and weekly quests, four extras
+
+### Nations War (Modes → 🌐)
+Several AI nations share one battlefield. Each nation has its own commander with its own gold, army, target and attack/defend decisions. Matchups rotate every day (the same worldwide, by UTC date). Each mode has three tiers (★, ★★, ★★★), and each tier unlocks the next.
+- **Three Kingdoms (free-for-all):**
+  - Your fort on the left, one nation's fort on the right, and a third nation in a **citadel in mid-field**.
+  - Everyone fights everyone. Nations also attack each other, and the citadel nation picks the weaker side to hit.
+  - When a fort falls, its nation is out of the war. The last fort standing wins.
+- **2 vs 2:** you and an allied nation (it follows your attack / hold / defend orders) against two enemy nations that share the right fort.
+- **Allied Raid:** you and an ally against **the Ember King**, a new hero boss, and his horde.
+  - The Ember King is a giant ifrit with molten skin and a flame crown. He has a stunning ground slam and area damage, summons fire breathers, and enrages at half health.
+  - You win by defeating him.
+- First win of the day in each mode: 💎 +20. First win of a tier: bonus gold and gems.
+
+How it works in the engine:
+- Units now carry a `nation`, and `hostile()` decides who fights whom. In classic modes this reduces to "different side", so their behaviour is unchanged: medium campaign bot win rate 86% before and after.
+- Castles have three slots (left, right, citadel).
+- Balance: `npx tsx scripts/war.ts` (REF=campaign level). Tuned factors are `WAR_TUNE` and `WAR_TIER_MULT` in `src/data/war.ts`. At level 30 the bot wins about 90–100% / 50–70% / 50% of tiers ★ / ★★ / ★★★.
+
+### Quests (`src/data/quests.ts`)
+- **5 daily quests** drawn from a pool of 14, with one free swap per day.
+- **5 weekly quests** from a pool of 10, with bigger rewards. Finishing all five weekly quests opens a bonus chest (🪙3000 + 💎120).
+- Resets happen at UTC midnight (daily) and Monday (weekly, ISO weeks), with countdowns on the screen.
+- Counts: wins, units, archers, riders, kills, miners stopped, perfect strikes, crates, seconds at the Oasis Well, 3-star wins, abilities used, Survival waves, Nations War wins, upgrades, bosses, challenges and tower floors, conquest wins.
+
+### Extras
+- **×3 battle speed.**
+- **Weekend festival:** battle gold ×1.5 for everyone every Friday–Sunday (UTC), announced on the menu.
+- **Offline treasury:** your mines keep digging while you're away (up to 8 h). Collect it on return, or double it with an ad.
+- **Quest swap:** one free swap per day.
+
 ## Backend (Supabase project `game`)
 
 - `player_saves`: one JSON save per user. RLS lets users read and write only their own row.
@@ -315,6 +346,8 @@ src/
   i18n.ts          Arabic/English strings, language list (LANGS), RTL switching
   i18n-*.ts        tr, fr, es, id, fa, ur, pt, ru, de, hi, zh, ja translations
   leaderboard.ts   global ranking (Supabase), names, flags
+  data/war.ts      Nations War modes, daily matchups, tiers
+  data/quests.ts   daily / weekly quest pools and rotation
   save.ts          local save, Supabase cloud save + analytics
   data/units.ts    unit stats (PRD §5) and upgrade formulas
   data/levels.ts   40 levels: regions, wave budgets, tuning
@@ -324,7 +357,7 @@ src/
   game/render.ts   canvas renderer (world, forts, effects)
   game/art.ts      character art for all units and monsters
   game/audio.ts    synthesized music + SFX
-scripts/           headless balance + tuning, i18n-check.ts
+scripts/           headless balance + tuning, war.ts, i18n-check.ts
 art-gallery.html   dev page that draws every unit
 supabase/          SQL migrations
 ```

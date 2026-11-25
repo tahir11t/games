@@ -16,7 +16,9 @@ export type EnemyId = UnitId
   | 'gravedigger' | 'zombie' | 'runner' | 'bloater' | 'skelarcher' | 'abomination' | 'necromancer' | 'plaguelord'
   | 'dwarfminer' | 'axethrower' | 'shieldwall' | 'berserker' | 'cannon' | 'gyrocopter' | 'dwarfking'
   | 'goblin' | 'goblinspear' | 'ogre' | 'troll' | 'cyclops' | 'frostgiant' | 'giantking'
-  | 'sprite' | 'moonarcher' | 'poltergeist' | 'soulreaper' | 'ghoul' | 'lich' | 'runepriest' | 'thunderlord' | 'mammoth' | 'colossus';
+  | 'sprite' | 'moonarcher' | 'poltergeist' | 'soulreaper' | 'ghoul' | 'lich' | 'runepriest' | 'thunderlord' | 'mammoth' | 'colossus'
+  // Nations War raid boss
+  | 'ifrit';
 
 export interface UnitDef {
   id: EnemyId;
@@ -57,6 +59,9 @@ export interface UnitDef {
 }
 
 export const UNITS: Record<EnemyId, UnitDef> = {
+  // --- Nations War: the Ember King, an ifrit warlord fought by two allied nations ---
+  ifrit:    { id: 'ifrit', cost: 0, train: 0, hp: 4800, dmg: 72, range: 70, speed: 30, cooldown: 1.6, unlock: 99, height: 150, splash: 85, regen: 5, boss: true,
+              stomp: { every: 8, radius: 210, dmg: 45, stun: 1.0 }, summon: { unit: 'fire', every: 11 } },
   // --- PRD roster ---
   miner:    { id: 'miner',    cost: 50,  train: 3,  hp: 60,  dmg: 2,  range: 22,  speed: 55, cooldown: 1.0, unlock: 1,  height: 49, miner: true },
   sword:    { id: 'sword',    cost: 75,  train: 2,  hp: 120, dmg: 12, range: 26,  speed: 60, cooldown: 0.9, unlock: 1,  height: 55 },
