@@ -1,4 +1,4 @@
-import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, CITADEL_X, ROAD_Y, castleX, type Unit, type SupplyDrop } from './battle';
+import { Battle, W, H, GROUND, CASTLE_X, MINE_X, WELL_X, WELL_R, type Unit, type SupplyDrop } from './battle';
 const LAST_STAND_VIS = 420;
 import type { RegionId } from '../data/levels';
 import { drawArt, glowDot, isLowQuality, shade as shadeHex } from './art';
@@ -6,6 +6,9 @@ import { UNITS, type EnemyId } from '../data/units';
 
 const INK = '#16120e';
 let TEAM = ['#e0a82e', '#9e1f1f'];
+let RING0 = '#e0a82e';
+/** Ring colour of your own army (follows the chosen palette). */
+export function setTeamRing(col: string) { RING0 = col; }
 /** Accessibility: blue enemy colour for colour-blind players, no shake/flashes for motion-sensitive ones. */
 export const a11y = { colorblind: false, calm: false };
 
@@ -51,7 +54,7 @@ export class Renderer {
     let target: number;
     if (b.controlled) target = b.controlled.x - this.viewW * 0.4;
     else {
-      const army = b.playerArmy.filter((u) => !u.def.miner);
+      const army = b.playerArmy.filter((u) => !u.def.miner && (!b.multi || u.road === b.viewRoad));
       const front = army.length ? Math.max(...army.map((u) => u.x)) : CASTLE_X[0];
       target = front - this.viewW * 0.6;
     }
@@ -64,7 +67,7 @@ export class Renderer {
     const th = THEMES[b.level.region];
     const time = (performance.now() - this.t0) / 1000;
     const low = isLowQuality();
-    TEAM = ['#e0a82e', a11y.colorblind ? '#2f6fd6' : b.level.enemyColor ?? '#9e1f1f'];
+    TEAM = [RING0, a11y.colorblind ? '#2f6fd6' : b.level.enemyColor ?? '#9e1f1f'];
     c.direction = 'ltr'; // numbers like "-20" must not flip on RTL pages
     c.setTransform(1, 0, 0, 1, 0, 0);
     const sk = c.createLinearGradient(0, 0, 0, this.canvas.height * 0.75);
@@ -100,12 +103,17 @@ export class Renderer {
 
     this.drawMine(MINE_X[0], b.mineLevel[0], b.rush, time);
     this.drawMine(MINE_X[1], b.mineLevel[1], b.rush, time);
-    this.drawCastle(0, b.castleHp[0] / b.castleMax[0], b.level.region, false, b, time);
-    this.drawCastle(1, isFinite(b.castleHp[1]) ? b.castleHp[1] / b.castleMax[1] : 1, b.level.region, !isFinite(b.castleHp[1]), b, time);
-    if (b.castleMax[2] > 0) { // Nations War: the third nation's citadel in mid-field
-      const cc = b.cmds.find((k) => k.castle === 2);
-      if (b.castleHp[2] > 0 || (cc && cc.alive)) this.drawCastle(1, b.castleHp[2] / b.castleMax[2], b.level.region, false, b, time, { slot: 2, style: cc?.faction ?? 'desert', color: a11y.colorblind ? '#8a5cd6' : cc?.color ?? '#7a3fb0' });
-      else { c.fillStyle = 'rgba(70,50,30,.55)'; c.beginPath(); c.ellipse(CITADEL_X, GROUND - 4, 110, 16, 0, 0, 7); c.fill(); } // rubble
+    if (b.multi) { // Nations War: the road on screen joins two rival forts
+      for (const end of [0, 1] as const) {
+        const fort = b.endFort(b.viewRoad, end);
+        const pct = isFinite(b.castleHp[fort]) ? Math.max(0, b.castleHp[fort]) / Math.max(1, b.castleMax[fort]) : 1;
+        if (fort === 0) { this.drawCastle(0, pct, b.level.region, false, b, time); continue; }
+        const cc = b.cmds.find((k) => k.nation === fort);
+        this.drawCastle(end, pct, b.level.region, !isFinite(b.castleHp[fort]), b, time, { slot: fort, style: cc?.faction ?? 'desert', color: a11y.colorblind ? '#2f6fd6' : cc?.color ?? '#9e1f1f' });
+      }
+    } else {
+      this.drawCastle(0, b.castleHp[0] / b.castleMax[0], b.level.region, false, b, time);
+      this.drawCastle(1, isFinite(b.castleHp[1]) ? b.castleHp[1] / b.castleMax[1] : 1, b.level.region, !isFinite(b.castleHp[1]), b, time);
     }
 
     // formation marker (a small banner on the ground)
@@ -115,15 +123,15 @@ export class Renderer {
       c.fillStyle = 'rgba(224,168,46,.85)'; c.beginPath(); c.moveTo(markX, GROUND - 46); c.lineTo(markX + 22 + Math.sin(time * 4) * 3, GROUND - 40); c.lineTo(markX, GROUND - 32); c.closePath(); c.fill();
     }
 
-    if (!b.level.war?.ffa) this.drawWell(b, time);
-    for (const d of b.drops) this.drawDrop(d, time);
+    if (!b.multi) this.drawWell(b, time);
+    for (const d of b.drops) if (!b.multi || d.road === b.viewRoad) this.drawDrop(d, time);
 
     this.lastControlled = b.controlled;
-    if (b.roadsOn) this.drawRoads(b);
-    const sorted = [...b.units].sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || b.groundY(a) - b.groundY(z));
+    const sorted = [...b.units].filter((u) => !b.multi || u.road === b.viewRoad).sort((a, z) => (a.def.flying ? 1 : 0) - (z.def.flying ? 1 : 0) || b.groundY(a) - b.groundY(z));
     for (const u of sorted) if (!u.hidden) this.drawUnit(u, b);
     // melee slash arcs and hit sparks
     for (const e of b.fx) {
+      if (b.multi && e.road !== undefined && e.road !== b.viewRoad) continue;
       const k = e.life / e.max;
       if (e.kind === 'pillar') {
         const g = c.createLinearGradient(e.x - 30, 0, e.x + 30, 0); g.addColorStop(0, 'rgba(255,230,120,0)'); g.addColorStop(0.5, `rgba(255,240,170,${0.8 * k})`); g.addColorStop(1, 'rgba(255,230,120,0)');
@@ -147,7 +155,7 @@ export class Renderer {
     }
 
     for (const p of b.projectiles) {
-      if (p.t < 0) continue;
+      if (p.t < 0 || (b.multi && p.road !== undefined && p.road !== b.viewRoad)) continue;
       if ((p.kind === 'arrow' || p.kind === 'bolt' || p.kind === 'magic') && (p.vx || p.vy)) { // motion trail
         const sp = Math.hypot(p.vx, p.vy) || 1;
         c.strokeStyle = p.kind === 'magic' ? 'rgba(200,150,255,.35)' : 'rgba(255,255,255,.35)'; c.lineWidth = p.kind === 'magic' ? 4 : 2;
@@ -171,10 +179,10 @@ export class Renderer {
       for (let k = 1; k < 6; k++) { const t2 = k / 6; c.lineTo(bo.x1 + (bo.x2 - bo.x1) * t2 + (Math.random() - 0.5) * 14, bo.y1 + (bo.y2 - bo.y1) * t2 + (Math.random() - 0.5) * 14); }
       c.lineTo(bo.x2, bo.y2); c.stroke(); c.strokeStyle = '#fff'; c.lineWidth = 1; c.stroke();
     }
-    for (const p of b.particles) { c.globalAlpha = Math.max(0, p.life) * 0.9; c.fillStyle = p.color; c.beginPath(); c.arc(p.x, p.y, p.size / 2, 0, 7); c.fill(); }
+    for (const p of b.particles) { if (b.multi && p.road !== undefined && p.road !== b.viewRoad) continue; c.globalAlpha = Math.max(0, p.life) * 0.9; c.fillStyle = p.color; c.beginPath(); c.arc(p.x, p.y, p.size / 2, 0, 7); c.fill(); }
     c.globalAlpha = 1;
     c.textAlign = 'center';
-    for (const t of b.texts) { c.font = `900 ${t.size ?? 18}px system-ui, sans-serif`; c.globalAlpha = Math.min(1, t.life * 2); c.fillStyle = INK; c.fillText(t.text, t.x + 1, t.y + 1); c.fillStyle = t.color; c.fillText(t.text, t.x, t.y); }
+    for (const t of b.texts) { if (b.multi && t.road !== undefined && t.road !== b.viewRoad) continue; c.font = `900 ${t.size ?? 18}px system-ui, sans-serif`; c.globalAlpha = Math.min(1, t.life * 2); c.fillStyle = INK; c.fillText(t.text, t.x + 1, t.y + 1); c.fillStyle = t.color; c.fillText(t.text, t.x, t.y); }
     c.globalAlpha = 1;
     c.restore();
 
@@ -515,7 +523,7 @@ export class Renderer {
   private drawCastle(side: 0 | 1, pct: number, region: RegionId, invulnerable: boolean, b: Battle, time: number, slotOpt?: { slot: number; style: string; color: string }) {
     const c = this.ctx;
     const slot = slotOpt?.slot ?? side;
-    const x = castleX(slot);
+    const x = CASTLE_X[side];
     const team0 = TEAM[side];
     if (slotOpt) TEAM[side] = slotOpt.color;
     const f = side === 0 ? 1 : -1;
@@ -673,26 +681,6 @@ export class Renderer {
     TEAM[side] = team0;
   }
 
-  /** Nations War roads: two packed-earth tracks with wheel ruts and road signs at each end. */
-  private drawRoads(b: Battle) {
-    const c = this.ctx;
-    for (const r of [0, 1]) {
-      const y = GROUND + ROAD_Y[r], hh = r === 0 ? 14 : 18;
-      const g = c.createLinearGradient(0, y - hh / 2, 0, y + hh / 2);
-      g.addColorStop(0, 'rgba(120,85,50,.0)'); g.addColorStop(0.3, 'rgba(120,85,50,.32)'); g.addColorStop(0.7, 'rgba(95,65,35,.34)'); g.addColorStop(1, 'rgba(95,65,35,0)');
-      c.fillStyle = g; c.fillRect(CASTLE_X[0], y - hh / 2, CASTLE_X[1] - CASTLE_X[0], hh);
-      c.strokeStyle = 'rgba(60,40,20,.25)'; c.lineWidth = 1.5; c.setLineDash([14, 10]);
-      for (const k of [-0.22, 0.22]) { c.beginPath(); c.moveTo(CASTLE_X[0] + 60, y + hh * k); c.lineTo(CASTLE_X[1] - 60, y + hh * k); c.stroke(); }
-      c.setLineDash([]);
-      for (const sx of [CASTLE_X[0] + 150, CASTLE_X[1] - 150]) { // signpost
-        c.fillStyle = '#6b4423'; c.fillRect(sx - 1.5, y - 34, 3, 30);
-        c.fillStyle = '#c9a46a'; c.beginPath(); c.roundRect(sx - 14, y - 40, 28, 12, 2); c.fill();
-        c.fillStyle = '#3a2410'; c.font = '900 9px system-ui'; c.textAlign = 'center'; c.fillText(r === 0 ? '⬆ N' : '⬇ S', sx, y - 31);
-      }
-    }
-    if (b.level.war?.ffa) { c.fillStyle = 'rgba(255,255,255,.05)'; c.fillRect(CITADEL_X - 120, GROUND + ROAD_Y[0] - 10, 240, 20); } // the north road bypasses the citadel
-  }
-
   /** The Oasis Well: palms, a stone well and a banner showing who holds it, with a capture ring. */
   private drawWell(b: Battle, time: number) {
     const c = this.ctx, x = WELL_X, G = GROUND;
@@ -755,7 +743,7 @@ export class Renderer {
 
   /** Ring colour: your army gold, the classic enemy red, each Nations War commander its own banner colour. */
   private teamColor(u: Unit, b: Battle) {
-    if (u.nation >= 2) { const cmd = b.cmds.find((k) => k.nation === u.nation); if (cmd) return a11y.colorblind && !cmd.ally ? (cmd.castle === 2 ? '#8a5cd6' : '#2f6fd6') : cmd.color; }
+    if (u.nation >= 2) { const cmd = b.cmds.find((k) => k.nation === u.nation); if (cmd) return a11y.colorblind && !cmd.ally ? '#2f6fd6' : cmd.color; }
     return TEAM[u.side];
   }
 
@@ -794,7 +782,7 @@ export class Renderer {
     const swing = u.moving ? Math.sin(u.anim) * 0.55 : 0;
     const atk = u.attacking > 0 ? Math.sin((1 - u.attacking / 0.3) * Math.PI) : 0;
     // a new tier (every 5 upgrade levels) also makes the unit a little bigger
-    const grow = (1 + (u.tier ?? 0) * 0.035) * (b.roadsOn && u.road === 0 ? 0.88 : 1); // the north road is farther away
+    const grow = 1 + (u.tier ?? 0) * 0.035;
     // attack lunge with a little squash & stretch for melee hits
     const lunge = !u.def.ranged && !u.def.miner && atk > 0 ? atk : 0;
     const sx = grow * (1 + lunge * 0.07), sy = grow * (1 - lunge * 0.05);

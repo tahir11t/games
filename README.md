@@ -281,7 +281,28 @@ Also new:
 
 To turn the leaderboard on in production: enable **anonymous sign-ins** (see below), then apply the v1.1 migration.
 
+## v1.4: one road per rival, relics, army colours, records, mastery, battle advice
+
+### Fronts: a separate road for every pair of rivals (replaces the v1.3 north/south roads)
+- Each pair of enemy nations fights on **its own road** (front). It is like a separate battlefield with a fort at each end, so the war reads cleanly instead of everyone sharing one strip.
+- **Three Kingdoms:** 3 fronts: you ⚔ nation A, you ⚔ nation B, and A ⚔ B. You can watch the A ⚔ B front (👁) while they wear each other down.
+- **2 vs 2:** you and your ally share your fort and face each enemy on its own front.
+- **Allied Raid / Boss Blitz:** the boss and the horde come down their own fronts.
+- **Front tabs** at the top of the battle screen. One tap (or the **V** key) jumps to a front. Each tab shows your soldiers versus enemy soldiers on that front, and a red **!** when enemies are near your fort. New soldiers deploy to the front you are watching. When a nation falls, its fronts close and its surviving soldiers move to an open front.
+- A one-time tip explains the tabs on your first war battle.
+
+### Five new features
+1. **🏺 Relics** (`src/data/relics.ts`): 8 relics. War Horn (damage), Bronze Aegis (health), Sand Boots (speed), Hourglass (ability charge), Djinn Lamp (starting gold), Falcon Eye (range), Golden Scarab (mining) and Tribal Banner (fort archers). Each goes up to level 5 using shards from loot chests (2/4/6 per chest) and the weekly quest bonus (+10). You can equip **2 at a time**. The boosts apply only to your own army.
+2. **🎨 Army colours:** 6 palettes for your soldiers, fort flags and rings: Desert Gold, Emerald, Sapphire, Ivory, Royal Violet and Onyx. Each unlocks at a campaign star total (0/25/60/100/150/195). If colour-blind mode is on, the Sapphire palette falls back to Desert Gold, so that blue stays reserved for enemies.
+3. **💡 Battle advice on defeat:** the defeat screen gives two concrete tips. They are based on what beat you (flyers, ranged army, giants), how early your fort fell, idle gold, mining and army level. Each tip shows the counter units to train next.
+4. **📜 Profile & lifetime records:** battles, wins, win rate, kills, bosses, best kill streak, units trained, gold mined, play time, stars, achievements and your favourite unit.
+5. **🎖️ Unit mastery:** lifetime kills with a unit type earn up to 5 stars (25/100/300/800/2000 kills). Each star gives that unit +2% damage and health. Mastery shows in Upgrades and on the Profile screen, and a banner announces each new star.
+
+Balance (`npx tsx scripts/war.ts`, level 30, N=10): Three Kingdoms 100/80/40%, 2 vs 2 80/90/50%, Raid 100/70/60% (tiers ★/★★/★★★). Boss Blitz is 80–100% for most bosses. The campaign bot is unchanged at 87%. Relics and mastery are player-side bonuses that build up slowly (with 2 relics equipped, at most about +15%).
+
 ## v1.3: roads, nation roles, Boss Blitz
+
+> The two-road layout below was replaced in v1.4 by one front per rival pair.
 
 ### Two roads in every Nations War battle
 - The battlefield has a **north road** (back) and a **south road** (front). Soldiers fight only foes on their own road. Flyers cross between roads; fort archers and sky abilities hit both.

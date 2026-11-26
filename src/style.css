@@ -491,3 +491,45 @@ h1, h2, h3 { margin: 0; }
 @keyframes feedIn { 0% { opacity: 0; transform: translateX(-20px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
 :root[dir="rtl"] .feed-line { animation-name: feedInR; }
 @keyframes feedInR { 0% { opacity: 0; transform: translateX(20px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+
+/* ---- v1.4: front tabs (one road per rival) ---- */
+.front-tabs { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 54px); left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 6; pointer-events: auto; max-width: calc(100vw - 32px); }
+.front-tab { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; border: 2px solid rgba(255,255,255,.18); background: rgba(43,29,16,.82); color: var(--sand, #f3e3c3); font: 700 13px system-ui, sans-serif; cursor: pointer; white-space: nowrap; position: relative; }
+.front-tab i { font-style: normal; opacity: .7; font-size: 11px; }
+.front-tab small { font-size: 10px; color: var(--muted, #c9b48f); margin-inline-start: 2px; direction: ltr; }
+.front-tab.on { border-color: var(--gold2, #ffd34d); background: rgba(120,80,20,.92); box-shadow: 0 0 10px rgba(255,211,77,.45); }
+.front-tab.watch { opacity: .62; }
+.front-tab.closed { opacity: .35; text-decoration: line-through; pointer-events: none; }
+.front-tab.danger { border-color: #e0453a; animation: pulse 1s infinite; }
+.front-tab.danger::after { content: '!'; position: absolute; top: -6px; inset-inline-end: -4px; background: #e0453a; color: #fff; border-radius: 50%; width: 15px; height: 15px; font-size: 11px; line-height: 15px; text-align: center; }
+.front-tip { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 92px); left: 50%; transform: translateX(-50%); z-index: 7; max-width: min(460px, calc(100vw - 32px)); background: rgba(25,16,8,.94); border: 2px solid var(--gold2, #ffd34d); border-radius: 14px; padding: 10px 12px; font-size: 13px; display: flex; gap: 10px; align-items: center; pointer-events: auto; }
+@media (max-width: 640px) { .front-tab { font-size: 11px; padding: 3px 7px; } .front-tabs { top: calc(env(safe-area-inset-top, 0px) + 46px); } }
+
+/* ---- relics ---- */
+.relic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.relic { display: flex; gap: 10px; align-items: center; background: var(--panel2); border-radius: 14px; padding: 10px; border: 2px solid transparent; }
+.relic.on { border-color: var(--gold2, #ffd34d); box-shadow: 0 0 12px rgba(255,211,77,.3); }
+.relic.locked .relic-ico { filter: grayscale(1); opacity: .55; }
+.relic-ico { font-size: 34px; width: 46px; text-align: center; }
+.relic .meta small { display: block; color: var(--muted); }
+.relic .bar { margin-top: 4px; }
+
+/* ---- profile, palettes, mastery ---- */
+.palettes { display: flex; flex-wrap: wrap; gap: 8px; }
+.palette { display: flex; flex-direction: column; align-items: center; gap: 3px; background: var(--panel2); border: 2px solid transparent; border-radius: 12px; padding: 6px 8px; color: inherit; cursor: pointer; min-width: 74px; }
+.palette i { width: 38px; height: 38px; border-radius: 50%; border: 2px solid rgba(0,0,0,.4); }
+.palette.on { border-color: var(--gold2, #ffd34d); }
+.palette:disabled { opacity: .5; cursor: default; }
+.palette small { font-size: 11px; }
+.mastery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.m-cell { display: flex; gap: 6px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 4px 8px; font-size: 13px; }
+.m-cell img { width: 40px; height: 40px; }
+.mastery { color: var(--gold2, #ffd34d); font-size: 12px; white-space: nowrap; }
+.mastery small { color: var(--muted); }
+
+/* ---- defeat advice ---- */
+.advice { background: rgba(255,211,77,.08); border: 1px solid rgba(255,211,77,.35); border-radius: 12px; padding: 8px 12px; margin: 0 0 10px; max-width: 520px; font-size: 13px; text-align: start; }
+.advice .tip { margin-top: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.advice .counters { display: inline-flex; gap: 2px; }
+.advice .counters img { width: 30px; height: 30px; background: rgba(0,0,0,.25); border-radius: 8px; }
+@media (max-height: 430px) { .advice { font-size: 11px; padding: 4px 8px; margin: 0 0 4px; } .advice .counters img { width: 22px; height: 22px; } }

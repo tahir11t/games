@@ -18,7 +18,9 @@ import { PREMIUM_UNITS, type EnemyId } from './data/units';
 import { PRODUCTS, SUB_PLANS, TEST_MODE, type Product } from './store';
 import { TOWER_FLOORS, towerLevel, towerRule } from './data/challenges';
 import { DIFFICULTY, tierOf, MAX_TOWER_ARCHERS, FORMATIONS, BONDS, type Difficulty, type BondId } from './game/battle';
-import { setLowQuality, drawArt, setColorblind } from './game/art';
+import { setLowQuality, drawArt, setColorblind, setArmyPalette } from './game/art';
+import { setTeamRing } from './game/render';
+import { RELICS, RELIC_MAX, RELIC_SLOTS, relicCost, relicBoosts, masteryStars, MASTERY_KILLS, MASTERY_PER_STAR, PALETTES, paletteById, type RelicDef } from './data/relics';
 import { LEVEL_COUNT } from './data/levels';
 
 const ui = document.getElementById('ui')!;
@@ -60,7 +62,10 @@ function armyFor(L?: LevelDef): ArmyId {
   if (L?.kind === 'challenge' || a === 'desert') return 'desert';
   return conquered(save.conquest[a] ?? 0) ? a : 'desert';
 }
-function perks(L?: LevelDef): Perks & { difficulty: Difficulty; army: ArmyId; extra: EnemyId[] } { return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives, difficulty: save.difficulty, army: armyFor(L), extra: PREMIUM_UNITS.filter((u) => save.owned.includes(u)) }; }
+function perks(L?: LevelDef): Perks & { difficulty: Difficulty; army: ArmyId; extra: EnemyId[]; boost: ReturnType<typeof relicBoosts>; mastery: Record<string, number> } {
+  const mastery: Record<string, number> = {}; for (const [k, v] of Object.entries(save.killsBy)) mastery[k] = masteryStars(v);
+  return { unitLevels: save.unitLevels, ability: save.ability, passives: save.passives, difficulty: save.difficulty, army: armyFor(L), extra: PREMIUM_UNITS.filter((u) => save.owned.includes(u)), boost: relicBoosts(save.equip, save.relics), mastery };
+}
 /** Portrait of any unit in the current look (civilization units borrow their role's upgrade tier). */
 function unitIcon(id: EnemyId) {
   if (id in save.unitLevels && !FACTIONS.some((f) => f.roles[id])) return iconFor(id as UnitId);
@@ -90,6 +95,7 @@ function applySettings() {
   renderer.showHp = save.showHp;
   if (a11y.colorblind !== save.a11y.colorblind) { enemyIcons.clear(); for (const k in facIcons) delete facIcons[k]; for (const k in bossIcons) delete bossIcons[k]; }
   a11y.colorblind = save.a11y.colorblind; a11y.calm = save.a11y.calm;
+  applyPalette();
   setColorblind(save.a11y.colorblind);
   document.documentElement.classList.toggle('calm', save.a11y.calm);
   document.querySelectorAll<HTMLElement>('[data-t]').forEach((el) => (el.textContent = t(el.dataset.t as Key)));
@@ -149,6 +155,41 @@ const ACH: { id: string; icon: string; gems: number }[] = [
 ];
 /** Short vibration on supported phones (Settings → Vibration). */
 function buzz(pattern: number | number[]) { try { if (save.vibrate && 'vibrate' in navigator) navigator.vibrate(pattern); } catch { /* not supported */ } }
+/** Icons for one end of a road: you, your ally, or a rival nation. */
+function frontLabel(b: Battle, team: number[]) {
+  return team.map((n) => (n === 0 ? '🛡️' : (() => { const c = b.cmds.find((k) => k.nation === n); return c ? factionById(c.faction).icon : '⚔'; })())).join('');
+}
+/** Jump the camera (and new soldiers) to another front. */
+function switchFront(i: number) {
+  const b = battle; if (!b || !b.frontOpen(i)) return;
+  b.viewRoad = i; renderer.follow = true; sfx('click');
+  updateFrontTabs(b);
+}
+/** Front tabs: active front, your soldiers vs theirs, alerts when your fort is pressed, fallen roads. */
+function updateFrontTabs(b: Battle) {
+  b.fronts.forEach((f, i) => {
+    const tab = document.querySelector<HTMLElement>(`[data-front="${i}"]`);
+    if (!tab) return;
+    const open = b.frontOpen(i);
+    const mineEnd = f.left.includes(0) ? 0 : f.right.includes(0) ? 1 : -1;
+    let mine = 0, foe = 0, danger = false;
+    for (const u of b.units) {
+      if (u.dead || u.def.miner || u.road !== i) continue;
+      const e = b.endOf(u);
+      if (mineEnd < 0) { if (e === 0) mine++; else foe++; continue; }
+      if (e === mineEnd) mine++; else { foe++; if (Math.abs(u.x - CASTLE_X_LEFT) < 520) danger = true; }
+    }
+    tab.classList.toggle('on', i === b.viewRoad);
+    tab.classList.toggle('closed', !open);
+    tab.classList.toggle('watch', mineEnd < 0);
+    tab.classList.toggle('danger', open && danger && i !== b.viewRoad);
+    (tab as HTMLButtonElement).disabled = !open;
+    const lbl = tab.querySelector('small');
+    if (lbl) lbl.textContent = open ? `${mineEnd < 0 ? '👁 ' : ''}${num(mine)}:${num(foe)}` : '🏳️';
+  });
+}
+const CASTLE_X_LEFT = 130;
+
 /** Compact battle feed (nation powers): a short line that slides in at the side and fades. */
 function feed(html: string, cls = '') {
   let box = ui.querySelector<HTMLElement>('.battle-feed');
@@ -187,6 +228,7 @@ function checkAchievements(b?: Battle, win?: boolean) {
   if (b) {
     save.totals.kills += b.stats.kills;
     save.totals.bosses += b.stats.bossKills;
+    recordTotals(b, !!win);
     if (win) unlockAch('first_win');
     if (win && save.difficulty === 'hard' && b.level.kind !== 'survival') unlockAch('hard');
     if (b.stats.enemyMinersKilled >= 10) unlockAch('raider');
@@ -208,6 +250,116 @@ function showAchievements() {
     <div class="ach-grid">${ACH.map((a) => { const got = save.achievements.includes(a.id); return `<div class="ach ${got ? 'got' : ''}"><div class="ach-ico">${got ? a.icon : '🔒'}</div><div class="meta"><b>${tk('ach_' + a.id)}</b><small>${tk('achd_' + a.id)}</small></div><span class="chip">💎 ${num(a.gems)}</span></div>`; }).join('')}</div>
   </div>`);
   mount(el);
+}
+
+// ---------------- v1.4: relics, army colours, profile & records, mastery, battle advice ----------------
+function applyPalette() {
+  let p = paletteById(save.palette);
+  if (a11y.colorblind && p.id === 'sapphire') p = PALETTES[0]; // keep blue for the colour-blind enemy
+  setArmyPalette(p.cloth, p.trim); setTeamRing(p.ring);
+  iconCache.clear();
+}
+function addShards(id: string, n: number) { const r = (save.relics[id] ??= { lvl: 0, shards: 0 }); r.shards += n; }
+const relicVal = (r: RelicDef, lvl: number) => (r.pct ? Math.round(r.per * lvl * 1000) / 10 : r.per * lvl);
+function relicReady() { return RELICS.some((r) => { const s2 = save.relics[r.id]; if (!s2 || s2.lvl >= RELIC_MAX) return false; const c = relicCost(s2.lvl); return s2.shards >= c.shards && save.gold >= c.gold; }); }
+function showRelics() {
+  const el = h(`<div class="screen">${topbar()}
+    <div class="panel col" style="max-width:860px;margin:0 auto;width:100%">
+      <h2 style="margin:0;color:var(--gold2)">🏺 ${t('relics')} <small style="color:var(--muted);font-size:14px">${t('equipped')} ${num(save.equip.length)}/${num(RELIC_SLOTS)}</small></h2>
+      <div style="color:var(--muted);font-size:13px">${t('relicsHint')}</div>
+      <div class="relic-grid">${RELICS.map((r) => {
+        const st = save.relics[r.id] ?? { lvl: 0, shards: 0 };
+        const cost = relicCost(st.lvl);
+        const on = save.equip.includes(r.id);
+        const can = st.lvl < RELIC_MAX && st.shards >= cost.shards && save.gold >= cost.gold;
+        return `<div class="relic ${st.lvl ? '' : 'locked'} ${on ? 'on' : ''}">
+          <div class="relic-ico">${r.icon}</div>
+          <div class="meta grow"><b>${tk('relic_' + r.id)}</b> <span class="chip">${st.lvl >= RELIC_MAX ? t('max') : `${num(st.lvl)}/${num(RELIC_MAX)}`}</span>
+            <small>${tn(('relicd_' + r.id) as Key, relicVal(r, Math.max(1, st.lvl)))}</small>
+            ${st.lvl < RELIC_MAX ? `<div class="bar"><i style="width:${Math.min(100, (st.shards / cost.shards) * 100)}%"></i></div><small>🏺 ${num(st.shards)}/${num(cost.shards)} ${t('shards')}</small>` : ''}</div>
+          <div class="col" style="gap:6px">
+            ${st.lvl < RELIC_MAX ? `<button class="btn small" data-rup="${r.id}" ${can ? '' : 'disabled'}>${st.lvl ? '⬆️' : '🔓'}${cost.gold ? ' 🪙' + num(cost.gold) : ''}</button>` : ''}
+            ${st.lvl ? `<button class="btn small ${on ? '' : 'secondary'}" data-req="${r.id}">${on ? '✓ ' + t('equipped') : t('equip')}</button>` : ''}
+          </div></div>`;
+      }).join('')}</div>
+    </div></div>`);
+  el.querySelectorAll<HTMLElement>('[data-rup]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.rup!; const st = save.relics[id]; if (!st) return;
+    const c = relicCost(st.lvl); if (st.shards < c.shards || save.gold < c.gold) return;
+    st.shards -= c.shards; save.gold -= c.gold; st.lvl++;
+    if (st.lvl === 1 && save.equip.length < RELIC_SLOTS) save.equip.push(id);
+    sfx('rank'); track('relic_upgraded', { relic: id, level: st.lvl }); persist(); showRelics();
+  }));
+  el.querySelectorAll<HTMLElement>('[data-req]').forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.req!;
+    if (save.equip.includes(id)) save.equip = save.equip.filter((x) => x !== id);
+    else { if (save.equip.length >= RELIC_SLOTS) save.equip.shift(); save.equip.push(id); }
+    sfx('click'); persist(); showRelics();
+  }));
+  mount(el);
+}
+/** Adds a finished battle to the lifetime records and to unit mastery. */
+const recorded = new WeakSet<Battle>();
+function recordTotals(b: Battle, win: boolean) {
+  if (recorded.has(b)) { if (win) save.totals.wins++; return; } // a revive ends the same battle twice
+  recorded.add(b);
+  const T = save.totals;
+  T.battles++; if (win) T.wins++;
+  T.playSec += Math.round(b.time); T.trained += b.stats.trained; T.mined += Math.round(b.stats.mined);
+  T.bestStreak = Math.max(T.bestStreak, b.stats.bestStreak);
+  for (const [k, v] of Object.entries(b.stats.killsBy)) {
+    const before = masteryStars(save.killsBy[k] ?? 0);
+    save.killsBy[k] = (save.killsBy[k] ?? 0) + (v ?? 0);
+    const after = masteryStars(save.killsBy[k]);
+    if (after > before && (UNITS as Record<string, unknown>)[k]) setTimeout(() => bannerMsg(`🎖️ ${tk('u_' + k)} · ${t('mastery')} ${'★'.repeat(after)}`, 'rush'), 2400);
+  }
+  persist();
+}
+const masteryLine = (id: string) => { const k = save.killsBy[id] ?? 0; const st = masteryStars(k); const next = MASTERY_KILLS[st]; return `<span class="mastery" title="${tn('masteryDesc', Math.round(MASTERY_PER_STAR * 100))}">🎖️ ${'★'.repeat(st)}${'☆'.repeat(MASTERY_KILLS.length - st)}${next ? ` <small>${num(k)}/${num(next)}</small>` : ''}</span>`; };
+function showProfile() {
+  const T = save.totals;
+  const fav = Object.entries(save.killsBy).sort((a, z) => z[1] - a[1])[0];
+  const hrs = Math.floor(T.playSec / 3600), mins = Math.floor((T.playSec % 3600) / 60);
+  const cell = (icon: string, label: string, v: string) => `<div class="stat-cell"><span>${icon}</span><b>${v}</b><small>${label}</small></div>`;
+  const stars = totalStars();
+  const el = h(`<div class="screen">${topbar()}
+    <div class="panel col" style="max-width:860px;margin:0 auto;width:100%">
+      <h2 style="margin:0;color:var(--gold2)">${save.profile.country ? flag(save.profile.country) + ' ' : ''}${displayName(t('defaultName'))}</h2>
+      <div class="stats-box">
+        ${cell('⚔️', t('st_battles'), num(T.battles))}${cell('🏆', t('st_wins'), num(T.wins))}${cell('📈', '%', num(T.battles ? Math.round((T.wins / T.battles) * 100) : 0))}
+        ${cell('💀', t('totalKills'), num(T.kills))}${cell('👑', t('st_bosses'), num(T.bosses))}${cell('🔥', t('st_bestStreak'), num(T.bestStreak))}
+        ${cell('🛡️', t('st_trained'), num(T.trained))}${cell('🪙', t('st_mined'), num(T.mined))}${cell('⏱️', t('st_playtime'), `${num(hrs)}:${String(mins).padStart(2, '0')}`)}
+        ${cell('⭐', t('stars'), num(stars))}${cell('🏅', t('achievements'), `${num(save.achievements.length)}/${num(ACH.length)}`)}
+        ${fav && (UNITS as Record<string, unknown>)[fav[0]] ? `<div class="stat-cell mvp"><img src="${iconFor(fav[0] as UnitId)}" alt=""><small>${t('favUnit')}: ${tk('u_' + fav[0])}</small></div>` : ''}
+      </div>
+      <h3 style="margin:6px 0 0">🎨 ${t('armyColor')}</h3>
+      <div class="palettes">${PALETTES.map((p) => { const lock = stars < p.stars; return `<button class="palette ${save.palette === p.id ? 'on' : ''}" data-pal="${p.id}" ${lock ? 'disabled' : ''} title="${tk('pal_' + p.id)}"><i style="background:linear-gradient(135deg,${p.cloth} 55%,${p.trim} 55%)"></i><small>${lock ? `🔒 ⭐${num(p.stars)}` : tk('pal_' + p.id)}</small></button>`; }).join('')}</div>
+      <h3 style="margin:6px 0 0">🎖️ ${t('mastery')} <small style="color:var(--muted);font-weight:400;font-size:13px">${tn('masteryDesc', Math.round(MASTERY_PER_STAR * 100))}</small></h3>
+      <div class="mastery-grid">${PLAYER_UNITS.filter((id) => isBase(id) || unitAvailable(id)).map((id) => `<div class="m-cell"><img src="${iconFor(id)}" alt=""><div><b>${tk('u_' + id)}</b><br>${masteryLine(id)}</div></div>`).join('')}</div>
+    </div></div>`);
+  el.querySelectorAll<HTMLElement>('[data-pal]').forEach((b) => b.addEventListener('click', () => { save.palette = b.dataset.pal!; applyPalette(); persist(); sfx('click'); showProfile(); }));
+  mount(el);
+}
+/** Defeat screen: two concrete tips read from what beat you. */
+function adviceHtml(b: Battle) {
+  const foes = Object.entries(b.stats.foes) as [EnemyId, number][];
+  const total = foes.reduce((a, [, n]) => a + n, 0) || 1;
+  const share = (pred: (d: (typeof UNITS)[EnemyId]) => boolean) => foes.filter(([id]) => UNITS[id] && pred(UNITS[id])).reduce((a, [, n]) => a + n, 0) / total;
+  const tips: { k: Key; unit?: EnemyId }[] = [];
+  const top = (pred: (d: (typeof UNITS)[EnemyId]) => boolean) => foes.filter(([id]) => UNITS[id] && pred(UNITS[id])).sort((a, z) => z[1] - a[1])[0]?.[0];
+  if (b.time < 75) tips.push({ k: 'tip_rush' });
+  if (share((d) => !!d.flying) > 0.2) tips.push({ k: 'tip_flyers', unit: top((d) => !!d.flying) });
+  if (share((d) => !!d.ranged && !d.miner) > 0.35) tips.push({ k: 'tip_ranged', unit: top((d) => !!d.ranged && !d.miner) });
+  if (foes.some(([id]) => UNITS[id] && (UNITS[id].hp >= 1000 || UNITS[id].boss))) tips.push({ k: 'tip_tanks', unit: top((d) => d.hp >= 1000 || !!d.boss) });
+  if (b.time > 100 && b.stats.mined < b.time * 2.5) tips.push({ k: 'tip_miners' });
+  if (b.stats.trained < b.time / 14) tips.push({ k: 'tip_spend' });
+  const avg = PLAYER_UNITS.filter(isBase).reduce((a, id) => a + save.unitLevels[id], 0) / PLAYER_UNITS.filter(isBase).length;
+  if (b.level.kind !== 'war' && avg < Math.min(15, 1 + (b.level.index ?? 1) / 4)) tips.push({ k: 'tip_upgrade' });
+  tips.push({ k: 'tip_ability' });
+  return `<div class="advice"><b>💡 ${t('advice')}</b>${tips.slice(0, 2).map((x) => {
+    const counters = x.unit ? countersOf(x.unit) : [];
+    return `<div class="tip">${t(x.k)}${counters.length ? `<span class="counters">${counters.map((c) => `<img src="${iconFor(c)}" alt="${tk('u_' + c)}" title="${tk('u_' + c)}">`).join('')}</span>` : ''}</div>`;
+  }).join('')}</div>`;
 }
 
 // ---------------- Codex: every unit with live art, stats and counters ----------------
@@ -370,6 +522,8 @@ function showMenu() {
           <button class="btn secondary" data-go="upgrades">⚔️ ${t('upgrades')}</button>
           <button class="btn secondary" data-go="rewards">🎁 ${t('daily')}${rewardsBadge() ? ' •' : ''}</button>
           <button class="btn secondary" data-go="army">🛡️ ${t('myArmy')}</button>
+          <button class="btn secondary" data-go="relics">🏺 ${t('relics')}${relicReady() ? ' •' : ''}</button>
+          <button class="btn secondary" data-go="profile">📜 ${t('profile')}</button>
           <button class="btn secondary" data-go="ach">🏅 ${t('achievements')} <small>${num(save.achievements.length)}/${num(ACH.length)}</small></button>
           <button class="btn secondary" data-go="codex">📖 ${t('codex')}</button>
           <button class="btn secondary" data-go="world">🌍 ${t('leaderboard')}</button>
@@ -391,6 +545,8 @@ function showMenu() {
     if (go === 'army') showArmies();
     if (go === 'codex') showCodex();
     if (go === 'world') showLeaderboard();
+    if (go === 'relics') showRelics();
+    if (go === 'profile') showProfile();
   }));
   mount(el);
 }
@@ -440,6 +596,7 @@ function showUpgrades() {
         <div class="meta">
           <div class="name">${tk('u_' + id)} <span style="color:var(--gold2)">Lv ${num(lvl)}</span>${tierOf(lvl) ? ` <span class="tier t${tierOf(lvl)}">${t(('tier_' + tierOf(lvl)) as Key)}</span>` : ''}</div>
           <div class="stat">${t('hp')} ${num(Math.round(d.hp * m))} · ${d.heal ? '✚ ' + num(Math.round(d.heal * m)) : t('dmg') + ' ' + num(Math.round(d.dmg * m))}</div>
+          ${locked ? '' : `<div class="stat">${masteryLine(id)}</div>`}
           ${locked ? `<div class="stat">🔒 ${t('unlocksAt')} ${num(d.unlock)}</div>` : lvl < MAX_UNIT_LEVEL ? `<div class="stat">✨ ${t('nextLook')} ${num(Math.min(20, (tierOf(lvl) + 1) * 5))}</div>` : ''}
         </div>
         ${locked ? '' : lvl >= MAX_UNIT_LEVEL ? `<span class="chip">${t('max')}</span>` :
@@ -499,7 +656,7 @@ function showRewards() {
         ${dailyQuests(save.dq.date, save.dq.swapped).map((q) => questRow(q, save.dq, true)).join('')}
         <h3 style="margin-top:6px">🗓️ ${t('weeklyQuests')} <small class="reset-in">⏳ ${dhm(msToReset().week)}</small></h3>
         ${weeklyQuests(save.wq.week).map((q) => questRow(q, save.wq, false)).join('')}
-        ${(() => { const all = weeklyQuests(save.wq.week).every((q) => save.wq.claimed.includes(q.id)); return `<div class="quest weekly-bonus"><div class="grow"><b>🎁 ${t('weeklyBonus')}</b> <span style="color:var(--muted)">${num(weeklyQuests(save.wq.week).filter((q) => save.wq.claimed.includes(q.id)).length)}/${num(5)}</span></div><button class="btn small" data-a="wbonus" ${all && !save.wq.bonus ? '' : 'disabled'}>${save.wq.bonus ? '✓' : rewardLabel(WEEKLY_BONUS)}</button></div>`; })()}
+        ${(() => { const all = weeklyQuests(save.wq.week).every((q) => save.wq.claimed.includes(q.id)); return `<div class="quest weekly-bonus"><div class="grow"><b>🎁 ${t('weeklyBonus')}</b> <span style="color:var(--muted)">${num(weeklyQuests(save.wq.week).filter((q) => save.wq.claimed.includes(q.id)).length)}/${num(5)}</span></div><button class="btn small" data-a="wbonus" ${all && !save.wq.bonus ? '' : 'disabled'}>${save.wq.bonus ? '✓' : rewardLabel(WEEKLY_BONUS) + ' 🏺' + num(10)}</button></div>`; })()}
       </div>
       <div class="col panel" style="align-items:center;justify-content:center;text-align:center">
         <div style="font-size:72px">🧰</div>
@@ -554,7 +711,7 @@ function showRewards() {
   }));
   el.querySelector('[data-a="wbonus"]')?.addEventListener('click', () => {
     if (save.wq.bonus || !weeklyQuests(save.wq.week).every((q) => save.wq.claimed.includes(q.id))) return;
-    save.wq.bonus = true; grant(WEEKLY_BONUS); persist(); showRewards();
+    save.wq.bonus = true; grant(WEEKLY_BONUS); addShards(RELICS[Math.floor(Math.random() * RELICS.length)].id, 10); persist(); showRewards();
   });
   mount(el);
 }
@@ -581,7 +738,7 @@ function showSettings() {
           <button class="btn small ${save.a11y.colorblind ? '' : 'secondary'}" data-a="cb">🎨 ${t('colorblind')}</button>
           <button class="btn small ${save.a11y.calm ? '' : 'secondary'}" data-a="calm">🌙 ${t('calm')}</button></div>
         <div class="row"><b class="grow">${t('cloud')}</b><span class="chip">${cloudOnline ? '☁️ ' + t('cloudOk') : '📱 ' + t('cloudOff')}</span></div>
-        <div style="font-size:12px;color:var(--muted)">v1.3.0</div>
+        <div style="font-size:12px;color:var(--muted)">v1.4.0</div>
       </div>
     </div>
   </div>`);
@@ -1008,7 +1165,8 @@ function startLevel(L: LevelDef, bonusGold: number) {
   startMusic(L.boss || L.kind === 'challenge' ? 'boss' : 'battle', save.music, L.region);
   track('level_start', { level: index, kind: L.kind ?? 'campaign', id: L.id, bonus_gold: bonusGold });
   renderer.playerArmy = armyFor(L);
-  battle = new Battle(L, perks(L), 150 + bonusGold, {
+  const pk = perks(L);
+  battle = new Battle(L, pk, 150 + bonusGold + Math.round(pk.boost.gold ?? 0), {
     onEnd: (win) => setTimeout(() => onBattleEnd(win), 1600),
     onStreak: (n, bonus) => { const k = n >= 12 ? 'st_godlike' : n >= 8 ? 'st_rampage' : n >= 5 ? 'st_mega' : 'st_triple'; ui.appendChild(h(`<div class="streak">${t(k as Key)} <small>+${num(bonus)} 🪙</small></div>`)); setTimeout(() => document.querySelector('.streak')?.remove(), 1600); sfx('rank'); },
     onRage: () => { bannerMsg(`🔥 ${t('rageMode')}`, 'rage'); sfx('volley'); },
@@ -1020,6 +1178,7 @@ function startLevel(L: LevelDef, bonusGold: number) {
     onPerfect: () => { sfx('rank'); buzz(35); const p = h(`<div class="perfect-pop">✦ ${t('perfect')}</div>`); ui.appendChild(p); setTimeout(() => p.remove(), 900); },
     onSpawn: (id, side) => { if (side === 1 && !save.seen.includes(id)) save.seen.push(id); },
     onEliminated: (nation) => { const c = battle?.cmds.find((k) => k.nation === nation); if (c) { bannerMsg(`🏳️ ${tk('f_' + c.faction)} ${t('eliminated')}`, 'rush'); buzz([40, 30, 40]); } },
+    onFront: () => { if (battle) updateFrontTabs(battle); },
     onPower: (nation, power) => { const c = battle?.cmds.find((k) => k.nation === nation); if (c) feed(`${ROLES[c.faction]?.icon ?? ''} <b>${tk('f_' + c.faction)}</b> ⚡ ${t(('power_' + power) as Key)}`, c.ally ? 'ally' : 'foe'); },
     onBoss: (id) => { if ((id as string) === 'enrage') { bannerMsg(`🔥 ${t('bossEnraged')}`, 'rage'); buzz([80, 40, 80]); } else { bannerMsg(`👑 ${tk('u_' + id)}`, 'rage'); buzz(120); } },
     onRank: (u) => { sfx('rank'); if (u.side === 0 && u.rank >= 2) unlockAch('veteran'); },
@@ -1132,7 +1291,6 @@ function buildHud() {
       <button class="tbtn" data-a="hide" title="${t('hideMiners')}">🏠<b data-r="hidelbl">${t('hide')}</b></button>
       <button class="tbtn" data-a="mine" title="${t('mineUp')}">⛏️<b data-r="mlvl">1/3</b><small data-r="mcost"></small></button>
       <button class="tbtn" data-a="tower" title="${t('towerArcher')}">🏹<b data-r="tcount">1/${MAX_TOWER_ARCHERS}</b><small data-r="tcost"></small></button>
-      ${b.roadsOn ? `<button class="tbtn" data-a="road" title="${t('road')}"><span>🛣️</span><b data-r="roadlbl">${t('roadAuto')}</b></button>` : ''}
       ${b.cmds.some((c) => c.ally) ? `<button class="tbtn ally-power" data-a="allypower" title="${t('allyPower')}"><span data-r="apico">${ROLES[b.cmds.find((c) => c.ally)!.faction]?.icon ?? '🤝'}</span><b>${t('allyPower')}</b></button>` : ''}
       <button class="tbtn" data-a="formation" title="${t('formation')}"><span data-r="fico">⚖️</span><b data-r="flbl">${t('f_line')}</b></button>
       <button class="cbtn" data-a="ctrl" title="${t('control')}">🎯</button>
@@ -1214,11 +1372,18 @@ function buildHud() {
     if (!btn || !battle) return;
     e.preventDefault(); battle.toggleRepeat(btn.dataset.u as EnemyId);
   });
-  el.querySelector('[data-a="road"]')?.addEventListener('pointerdown', (e) => {
-    e.preventDefault(); if (!battle) return;
-    battle.roadChoice = battle.roadChoice === 'auto' ? 0 : battle.roadChoice === 0 ? 1 : 'auto';
-    $(el, '[data-r="roadlbl"]').textContent = t(battle.roadChoice === 'auto' ? 'roadAuto' : battle.roadChoice === 0 ? 'roadN' : 'roadS'); sfx('click');
-  });
+  if (b.multi) { // front tabs: one road per rival, one tap to jump to it
+    const tabs = h(`<div class="front-tabs">${b.fronts.map((f, i) => `<button class="front-tab" data-front="${i}">${frontLabel(b, f.left)}<i>⚔</i>${frontLabel(b, f.right)}<small data-r="fc${i}"></small></button>`).join('')}</div>`);
+    ui.appendChild(tabs);
+    tabs.querySelectorAll<HTMLElement>('[data-front]').forEach((tb2) => tb2.addEventListener('pointerdown', (e) => { e.preventDefault(); switchFront(Number(tb2.dataset.front)); }));
+    if (!save.tips.includes('fronts')) {
+      save.tips.push('fronts'); persist();
+      const tip = h(`<div class="front-tip">🛣️ ${t('frontsHint')}<button class="btn small" data-a="gotit">${t('gotIt')}</button></div>`);
+      ui.appendChild(tip);
+      $(tip, '[data-a="gotit"]').addEventListener('click', () => tip.remove());
+      setTimeout(() => tip.remove(), 12000);
+    }
+  }
   el.querySelector('[data-a="allypower"]')?.addEventListener('pointerdown', (e) => { e.preventDefault(); const c = battle?.cmds.find((k) => k.ally); if (c && battle?.usePower(c)) buzz(40); });
   const fb = $(el, '[data-a="formation"]');
   const FICO: Record<string, string> = { line: '⚖️', wedge: '🔺', wall: '🧱', skirmish: '🏹' };
@@ -1311,6 +1476,7 @@ addEventListener('keydown', (e) => {
   if (!battle) return;
   const digit = /^Digit([1-9])$/.exec(e.code);
   if (unitPages && digit) { const id = unitPages.order[unitPage * unitPages.perPage + Number(digit[1]) - 1]; if (id) { if (e.shiftKey) battle.toggleRepeat(id); else battle.train(id); } }
+  if (e.key === 'v' && battle.multi) { const open = battle.fronts.map((_, i) => i).filter((i) => battle!.frontOpen(i)); switchFront(open[(open.indexOf(battle.viewRoad) + 1) % open.length]); }
   if (e.key === 'f') { const next = FORMATIONS[(FORMATIONS.indexOf(battle.formation) + 1) % FORMATIONS.length]; battle.setFormation(next); }
   if (e.key === 'Tab' && unitPages) { e.preventDefault(); unitPages.show(unitPage + (e.shiftKey ? -1 : 1)); }
   if (e.key === 'a' || e.key === 'ArrowLeft') battle.ctrlDir = -1;
@@ -1404,7 +1570,8 @@ function updateHud() {
   mx.clearRect(0, 0, mc.width, mc.height);
   mx.fillStyle = b.well.owner === 0 ? '#7dff9a' : b.well.owner === 1 ? '#ff7a6a' : 'rgba(255,255,255,.5)'; mx.beginPath(); mx.arc(W / 2 * k, mc.height - 6, 4, 0, 7); mx.fill();
   for (const d of b.drops) { mx.fillStyle = '#ffe066'; mx.fillRect(d.x * k - 2, mc.height - 10, 4, 4); }
-  for (const u of b.units) { if (u.dead || u.def.miner) continue; mx.fillStyle = u.side ? (save.a11y.colorblind ? '#4d8fff' : '#e0453a') : '#ffd34d'; mx.fillRect(u.x * k - 2, u.def.flying ? 4 : 12, u.def.boss ? 8 : 4, u.def.boss ? 14 : 10); }
+  if (b.multi) updateFrontTabs(b);
+  for (const u of b.units) { if (u.dead || u.def.miner || (b.multi && u.road !== b.viewRoad)) continue; mx.fillStyle = u.side ? (save.a11y.colorblind ? '#4d8fff' : '#e0453a') : '#ffd34d'; mx.fillRect(u.x * k - 2, u.def.flying ? 4 : 12, u.def.boss ? 8 : 4, u.def.boss ? 14 : 10); }
   mx.strokeStyle = 'rgba(255,255,255,.8)'; mx.lineWidth = 3; mx.strokeRect(renderer.cam * k, 2, renderer.viewW * k, mc.height - 4);
 }
 
@@ -1455,7 +1622,7 @@ function pauseMenu() {
 }
 
 // ---------------- Loot chests ----------------
-interface Loot { tier: 'wood' | 'silver' | 'gold'; gold: number; gems: number; upgrade?: UnitId }
+interface Loot { tier: 'wood' | 'silver' | 'gold'; gold: number; gems: number; upgrade?: UnitId; shards?: { id: string; n: number } }
 function rollChest(L: LevelDef, stars: number): Loot | null {
   const bossy = L.boss || L.kind === 'challenge';
   const chance = bossy ? 1 : L.kind === 'conquest' ? 0.5 : 0.3 + stars * 0.05;
@@ -1468,8 +1635,10 @@ function rollChest(L: LevelDef, stars: number): Loot | null {
     const pool = PLAYER_UNITS.filter((u) => unitAvailable(u) && save.unitLevels[u] < MAX_UNIT_LEVEL);
     if (pool.length) loot.upgrade = pool[Math.floor(Math.random() * pool.length)];
   }
+  loot.shards = { id: RELICS[Math.floor(Math.random() * RELICS.length)].id, n: tier === 'gold' ? 6 : tier === 'silver' ? 4 : 2 };
   save.gold += loot.gold; save.gems += loot.gems;
   if (loot.upgrade) save.unitLevels[loot.upgrade]++;
+  addShards(loot.shards.id, loot.shards.n);
   persist();
   return loot;
 }
@@ -1477,7 +1646,7 @@ function chestHtml(loot: Loot | null) {
   if (!loot) return '';
   const icon = loot.tier === 'gold' ? '👑' : loot.tier === 'silver' ? '💎' : '🪵';
   return `<button class="chest ${loot.tier}" data-a="chest"><div class="chest-box">🧰<span>${icon}</span></div><small>${tk('chest_' + loot.tier)} · ${t('tapToOpen')}</small>
-    <div class="chest-loot">🪙 ${num(loot.gold)}${loot.gems ? ` · 💎 ${num(loot.gems)}` : ''}${loot.upgrade ? ` · ⬆️ ${tk('u_' + loot.upgrade)} +1` : ''}</div></button>`;
+    <div class="chest-loot">🪙 ${num(loot.gold)}${loot.gems ? ` · 💎 ${num(loot.gems)}` : ''}${loot.upgrade ? ` · ⬆️ ${tk('u_' + loot.upgrade)} +1` : ''}${loot.shards ? ` · ${RELICS.find((r) => r.id === loot.shards!.id)!.icon} ${tk('relic_' + loot.shards.id)} +${num(loot.shards.n)}` : ''}</div></button>`;
 }
 function bindChest(el: HTMLElement) {
   el.querySelector('[data-a="chest"]')?.addEventListener('click', (e) => { const btn = e.currentTarget as HTMLElement; if (btn.classList.contains('opened')) return; btn.classList.add('opening'); sfx('volley'); setTimeout(() => { btn.classList.add('opened'); sfx('rank'); }, 700); });
@@ -1529,6 +1698,7 @@ function onBattleEnd(win: boolean) {
     const el = h(`<div class="screen dim" style="z-index:20"><div class="panel result lose col" style="align-items:center">
       <h2>${t('defeat')}</h2>
       ${statsHtml(b)}
+      ${adviceHtml(b)}
       ${canRevive ? `<button class="btn ad" data-a="revive">${t('reviveAd')}</button>` : ''}
       <div class="row"><button class="btn" data-a="retry">${t('retry')}</button><button class="btn secondary" data-a="upg">⚔️ ${t('upgrades')}</button><button class="btn secondary" data-a="menu">${t('back')}</button></div>
     </div></div>`);
@@ -1766,4 +1936,4 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && battle && !battle.over && !battle.paused) pauseMenu();
 });
 // Dev-only hook for automated UI tests.
-if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, conquestLevel, factionById, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges, offlineTreasury, blitzLevel };
+if (import.meta.env.DEV) (window as unknown as { __sw: unknown }).__sw = { get battle() { return battle; }, renderer, setLowQuality, save, conquestLevel, factionById, startBattle, startLevel, challengeLevel, challengeById, survivalLevel, showShop, showModes, showChallenges, offlineTreasury, blitzLevel, warLevel, showRelics, showProfile, applyPalette };

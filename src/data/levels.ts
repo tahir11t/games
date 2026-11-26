@@ -38,21 +38,21 @@ export interface EnemyAI {
 }
 
 /** Nations War: AI nations that share the battlefield with the player. */
+/** Nations War: AI nations that share the war with the player. Nation i of the list has id i + 2. */
 export interface NationSpec {
-  faction: string; // civilization id (its army and fort style)
+  faction: string; // civilization id (its army, fort style and role)
   side: 0 | 1; // 0 = fights beside the player, 1 = against
-  castle: 0 | 1 | 2; // fort slot it defends: 0 player's (allies), 1 right fort, 2 mid-field citadel
   stat: number; income: number; startGold: number; color: string; ally?: boolean;
-  road?: number; // fixed road for this nation's soldiers (else chosen each time)
+  fortHp?: number; // its own fort (allies share the player's fort); Infinity = cannot be destroyed
 }
 export interface WarSpec {
   mode: 'ffa' | 'duo' | 'raid' | 'blitz';
   ffa: boolean; // every nation fights every other nation
   nations: NationSpec[];
-  citadelHp?: number;
-  boss?: EnemyId; bossAt?: number; bossMult?: number;
+  /** One road per pair of rivals: the teams (nation ids, 0 = player) at its left and right ends. */
+  fronts: { left: number[]; right: number[] }[];
+  boss?: EnemyId; bossAt?: number; bossMult?: number; bossFront?: number;
   grace?: number;
-  roads?: boolean; // two roads (north / south)
   timeLimit?: number; // Boss Blitz: seconds to defeat the boss
   bossDmg?: number; // extra boss damage factor
 }

@@ -34,7 +34,7 @@ export interface SaveData {
   camMode: 'both' | 'arrows' | 'touch';
   quality: 'auto' | 'high' | 'low';
   achievements: string[];
-  totals: { kills: number; bosses: number };
+  totals: { kills: number; bosses: number; battles: number; wins: number; playSec: number; trained: number; bestStreak: number; mined: number };
   conquest: Record<string, number>; // faction -> battles won
   conquestStars: Record<string, number>; // 'elves-3' -> stars
   musicRotate: number; // minutes between automatic track changes (0 = off)
@@ -52,6 +52,11 @@ export interface SaveData {
   wq: { week: string; c: Record<string, number>; claimed: string[]; bonus: boolean }; // weekly quests
   war: { won: Record<string, number>; firstWin: Record<string, string>; blitzBest?: Record<string, number> }; // Nations War: wins per mode-tier, last daily first-win date, Boss Blitz best seconds
   idleAt: number; // when the offline treasury was last collected
+  tips: string[]; // one-time hints already shown
+  relics: Record<string, { lvl: number; shards: number }>; // v1.4 relic levels and spare shards
+  equip: string[]; // equipped relic ids (max 2)
+  palette: string; // army colour id
+  killsBy: Record<string, number>; // lifetime kills per unit type (mastery)
   updatedAt: number;
 }
 
@@ -60,7 +65,7 @@ const KEY = 'sandwars.save.v1';
 /** Fill in fields added after a save was written (shallow + nested maps). */
 export function migrate(raw: Partial<SaveData>): SaveData {
   const d = defaultSave();
-  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub }, profile: { ...d.profile, ...raw.profile }, a11y: { ...d.a11y, ...raw.a11y }, dq: { ...d.dq, ...raw.dq }, wq: { ...d.wq, ...raw.wq }, war: { ...d.war, ...raw.war } };
+  return { ...d, ...raw, unitLevels: { ...d.unitLevels, ...raw.unitLevels }, passives: { ...d.passives, ...raw.passives }, trophies: { ...raw.trophies }, totals: { ...d.totals, ...raw.totals }, relics: { ...raw.relics }, killsBy: { ...raw.killsBy }, conquest: { ...raw.conquest }, conquestStars: { ...raw.conquestStars }, sub: { ...d.sub, ...raw.sub }, profile: { ...d.profile, ...raw.profile }, a11y: { ...d.a11y, ...raw.a11y }, dq: { ...d.dq, ...raw.dq }, wq: { ...d.wq, ...raw.wq }, war: { ...d.war, ...raw.war } };
 }
 const today = () => new Date().toISOString().slice(0, 10);
 /** The device's country from its locale (e.g. ar-SA → SA), if it names one. */
@@ -100,7 +105,7 @@ export function defaultSave(): SaveData {
     camMode: 'both',
     quality: 'auto',
     achievements: [],
-    totals: { kills: 0, bosses: 0 },
+    totals: { kills: 0, bosses: 0, battles: 0, wins: 0, playSec: 0, trained: 0, bestStreak: 0, mined: 0 },
     conquest: {},
     conquestStars: {},
     musicRotate: 0,
@@ -119,6 +124,11 @@ export function defaultSave(): SaveData {
     wq: { week: '', c: {}, claimed: [], bonus: false },
     war: { won: {}, firstWin: {} },
     idleAt: Date.now(),
+    tips: [],
+    relics: {},
+    equip: [],
+    palette: 'gold',
+    killsBy: {},
     updatedAt: Date.now(),
   };
 }
@@ -234,7 +244,7 @@ export function track(name: string, params: Record<string, unknown> = {}) {
 export async function flushEvents() {
   if (!sb || !userId || !queue.length) return;
   const batch = queue.splice(0, queue.length).map((e) => ({
-    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.3.0', locale: save.lang,
+    user_id: userId, name: e.name, params: e.params, session_id: sessionId, app_version: '1.4.0', locale: save.lang,
   }));
   const { error } = await sb.from('analytics_events').insert(batch);
   if (error) console.warn('[analytics] flush failed', error.message);

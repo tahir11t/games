@@ -32,6 +32,12 @@ export function playWar(mode: WarMode, tier: number, ref: number, date: string, 
     else if (army.length < 4 && b.mode === 'attack') b.setMode('defend');
     if (b.ability >= 1 && enemies.length >= 3) b.useAbility();
     for (const c of b.cmds) if (c.ally && c.power >= 1) b.usePower(c); // call the ally's nation power
+    // like a player: watch (and reinforce) the open front where your soldiers are most outnumbered
+    if (b.multi) {
+      const mine = b.fronts.map((_, i) => i).filter((i) => b.frontOpen(i) && (b.fronts[i].left.includes(0) || b.fronts[i].right.includes(0)));
+      const need = (i: number) => b.units.filter((u) => !u.dead && u.road === i && b.endOf(u) === 1).length - b.units.filter((u) => !u.dead && u.road === i && u.nation === 0 && !u.def.miner).length;
+      if (mine.length) b.viewRoad = mine.sort((x, y) => need(y) - need(x))[0];
+    }
     if (L.war?.timeLimit && army.length >= 6 && b.mode !== 'attack') b.setMode('attack'); // Blitz: no time to turtle
     if (b.gold > b.mineCost() + 250) b.upgradeMine();
   }

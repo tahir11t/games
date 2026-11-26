@@ -12,6 +12,8 @@ const SKIN = ['#f1c49a', '#c48a5e'];
 const CLOTH = ['#f4b942', '#c8323c'];
 const TRIM = ['#1f9e8f', '#3a1520'];
 /** Colour-blind safe mode: the enemy army wears blue instead of red (gold vs blue reads for all common types). */
+/** Your army's colours (cosmetic palette). */
+export function setArmyPalette(cloth: string, trim: string) { CLOTH[0] = cloth; TRIM[0] = trim; }
 export function setColorblind(on: boolean) { CLOTH[1] = on ? '#2f6fd6' : '#c8323c'; TRIM[1] = on ? '#12285a' : '#3a1520'; }
 
 type C = CanvasRenderingContext2D;
